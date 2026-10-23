@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 from stockfish_vision.capture.screen import ScreenCapture, list_monitors
 from stockfish_vision.config import EngineSettings
 from stockfish_vision.engine.client import AnalysisResult, EngineClient
+from stockfish_vision.recognition.calibrate import learn_templates
 from stockfish_vision.recognition.pieces import Detection, PieceClassifier
 from stockfish_vision.recognition.plausibility import Correction
 
@@ -100,7 +101,10 @@ class RecognitionWorker(QObject):
     request_recognize = Signal(object, object, object)
     request_correction = Signal(object, object)
     request_configure = Signal(object, object, object)
+    request_learn = Signal(object, object)
+    request_reload_templates = Signal()
     finished = Signal(object)
+    learned = Signal(object)
     failed = Signal(str)
 
     def __init__(
@@ -153,6 +157,28 @@ class RecognitionWorker(QObject):
             self.classifier.min_confidence = self.min_confidence
         if model_changed:
             self.classifier = None
+
+    @Slot(object, object)
+    def learn(self, warped: np.ndarray, orientation: str) -> None:
+        """Lernt den sichtbaren Figurensatz aus der Grundstellung."""
+        try:
+            classifier = self._ensure_classifier()
+            report = learn_templates(
+                warped, str(orientation), bank=classifier.templates
+            )
+            classifier.reload_templates()
+            self.learned.emit(report)
+        except Exception as exc:
+            logger.exception("Figurensatz konnte nicht angelernt werden")
+            self.failed.emit(f"{exc}\n{traceback.format_exc()}")
+
+    @Slot()
+    def reload_templates(self) -> None:
+        try:
+            count = self._ensure_classifier().reload_templates()
+            logger.info("Figurenvorlagen neu geladen: %s", count)
+        except Exception as exc:
+            logger.warning("Figurenvorlagen konnten nicht neu geladen werden: %s", exc)
 
     @Slot(object, object)
     def remember_correction(self, square_img: np.ndarray, symbol: str | None) -> None:

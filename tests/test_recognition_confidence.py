@@ -53,5 +53,5 @@ def test_manual_template_is_reused() -> None:
     piece, confidence, occupied, source = classifier.classify_square(bgr)
     assert occupied
     assert piece is not None and piece.symbol() == "R"
-    assert source == "template"
+    assert source == "vorlage"
     assert confidence > 0.99

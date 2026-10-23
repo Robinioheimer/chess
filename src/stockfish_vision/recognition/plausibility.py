@@ -14,9 +14,10 @@ from dataclasses import dataclass
 
 import chess
 
-__all__ = ["Correction", "MAX_PAWNS", "repair_symbols"]
+__all__ = ["Correction", "MAX_PAWNS", "MAX_PIECES", "repair_symbols"]
 
 MAX_PAWNS = 8
+MAX_PIECES = 16
 
 BACK_RANKS = {chess.WHITE: chess.BB_RANK_1, chess.BLACK: chess.BB_RANK_8}
 HOME_KING = {chess.WHITE: chess.E1, chess.BLACK: chess.E8}
@@ -160,7 +161,20 @@ def repair_symbols(
             "Bauer auf der Grundreihe",
         )
 
-    # 3. Höchstens acht Bauern je Farbe; der unsicherste Bauer weicht.
+    # 3. Höchstens 16 Figuren je Farbe; die unsicherste Figur weicht.
+    for color in (chess.WHITE, chess.BLACK):
+        pieces = [
+            square
+            for square, symbol in repaired.items()
+            if symbol is not None and _color_of(symbol) == color
+        ]
+        if len(pieces) <= MAX_PIECES:
+            continue
+        pieces.sort(key=lambda square: _score(repaired, scores, square))
+        for square in pieces[: len(pieces) - MAX_PIECES]:
+            _replace(repaired, corrections, square, None, "mehr als 16 Figuren")
+
+    # 4. Höchstens acht Bauern je Farbe; der unsicherste Bauer weicht.
     for color in (chess.WHITE, chess.BLACK):
         pawns = [
             square

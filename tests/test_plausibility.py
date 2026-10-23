@@ -115,3 +115,22 @@ def test_black_and_white_piece_counts_are_independent() -> None:
     assert len(_squares_with(repaired, "P")) == MAX_PAWNS
     assert len(_squares_with(repaired, "p")) == 8
     assert len(corrections) == 1
+
+
+def test_more_than_sixteen_pieces_lose_the_weakest() -> None:
+    board = chess.Board()
+    symbols = {
+        square: (board.piece_at(square).symbol() if board.piece_at(square) else None)
+        for square in chess.SQUARES
+    }
+    # Weiß erhält eine zusätzliche Dame auf einem freien Feld.
+    symbols[chess.D4] = "Q"
+    scores = {square: {symbol: 0.9} for square, symbol in symbols.items() if symbol}
+    scores[chess.D4] = {"Q": 0.31}
+
+    repaired, corrections = repair_symbols(symbols, scores)
+
+    white = [square for square, symbol in repaired.items() if symbol and symbol.isupper()]
+    assert len(white) == 16
+    assert repaired[chess.D4] is None
+    assert any("16 Figuren" in item.reason for item in corrections)

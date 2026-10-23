@@ -10,6 +10,7 @@ import numpy as np
 
 from stockfish_vision.board.geometry import extract_square, image_rc_to_square
 from stockfish_vision.chesslogic.fenutil import board_from_piece_map, describe_validity
+from stockfish_vision.paths import app_data_dir
 from stockfish_vision.recognition.hog_svm import (
     PIECE_CLASSES,
     SvmDecisionScorer,
@@ -25,8 +26,15 @@ __all__ = [
     "Detection",
     "PieceClassifier",
     "TemplateBank",
+    "default_template_path",
+    "normalize_tile",
     "occupancy_score",
 ]
+
+
+def default_template_path() -> Path:
+    """Ablage der gelernten Figurenvorlagen im Benutzerprofil."""
+    return _default_template_path()
 
 
 def _gray(image: np.ndarray) -> np.ndarray:
@@ -81,35 +89,131 @@ class Detection:
     alternatives: dict[str, float] = field(default_factory=dict)
 
 
+def normalize_tile(square_img: np.ndarray, size: int = 32) -> np.ndarray | None:
+    """Schneidet die Figur frei und normiert sie auf ``size`` × ``size``.
+
+    Der Hintergrund wird aus den Rändern des Feldes geschätzt, die Figur über
+    die Abweichung davon maskiert und auf ihre Bounding-Box beschnitten.
+    Dadurch sind Vorlagen unabhängig von Feldgröße, Figurengröße und
+    Position im Feld – der entscheidende Punkt bei echten Screenshots.
+    """
+
+    gray = _gray(square_img)
+    if gray.shape[0] < 8 or gray.shape[1] < 8:
+        return None
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    border = np.concatenate(
+        (
+            gray[:3].ravel(),
+            gray[-3:].ravel(),
+            gray[3:-3, :3].ravel(),
+            gray[3:-3, -3:].ravel(),
+        )
+    )
+    background = float(np.median(border))
+    difference = np.abs(gray.astype(np.float32) - background)
+    threshold = max(10.0, float(np.percentile(difference, 60)))
+    mask = difference > threshold
+    if float(mask.mean()) < 0.02:
+        return None
+    rows = np.flatnonzero(mask.any(axis=1))
+    cols = np.flatnonzero(mask.any(axis=0))
+    if rows.size == 0 or cols.size == 0:
+        return None
+    top, bottom = int(rows[0]), int(rows[-1])
+    left, right = int(cols[0]), int(cols[-1])
+    if bottom - top < 3 or right - left < 3:
+        return None
+    # Quadratisch machen, damit die Seitenverhältnisse erhalten bleiben.
+    height = bottom - top + 1
+    width = right - left + 1
+    side = max(height, width)
+    pad_y = (side - height) // 2
+    pad_x = (side - width) // 2
+    top = max(0, top - pad_y)
+    left = max(0, left - pad_x)
+    patch = gray[top : top + side, left : left + side]
+    if patch.size == 0:
+        return None
+    return cv2.resize(patch, (size, size), interpolation=cv2.INTER_AREA)
+
+
+def _default_template_path() -> Path:
+    return app_data_dir() / "templates" / "piece_templates.npz"
+
+
 @dataclass
 class TemplateBank:
+    """Gelernte Vorlagen des tatsächlich verwendeten Figurensatzes."""
+
     templates: dict[str, list[np.ndarray]] = field(default_factory=dict)
     max_samples_per_class: int = 8
+    size: int = 32
 
-    def add(self, symbol: str, square_img: np.ndarray) -> None:
+    def add(self, symbol: str, square_img: np.ndarray) -> bool:
         if symbol not in PIECE_CLASSES:
             raise ValueError(f"Unbekannte Figurenklasse: {symbol}")
-        gray = _gray(square_img)
-        resized = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
+        normalized = normalize_tile(square_img, size=self.size)
+        if normalized is None:
+            return False
         samples = self.templates.setdefault(symbol, [])
-        samples.append(resized)
+        samples.append(normalized)
         del samples[: -self.max_samples_per_class]
+        return True
 
     def match(self, square_img: np.ndarray) -> tuple[str | None, float]:
+        """Beste Vorlage und Korrelation (0..1)."""
+
         if not self.templates:
             return None, 0.0
-        resized = cv2.resize(_gray(square_img), (32, 32), interpolation=cv2.INTER_AREA)
+        normalized = normalize_tile(square_img, size=self.size)
+        if normalized is None:
+            return None, 0.0
         best_symbol: str | None = None
         best_correlation = -1.0
         for symbol, samples in self.templates.items():
-            for sample in samples[-4:]:
-                result = cv2.matchTemplate(resized, sample, cv2.TM_CCOEFF_NORMED)
+            for sample in samples:
+                if sample.shape != normalized.shape:
+                    continue
+                result = cv2.matchTemplate(normalized, sample, cv2.TM_CCOEFF_NORMED)
                 correlation = float(result.max())
                 if correlation > best_correlation:
                     best_correlation = correlation
                     best_symbol = symbol
-        # Preserve the historic 0..1 correlation score used by the GUI.
         return best_symbol, max(0.0, min(1.0, (best_correlation + 1.0) / 2.0))
+
+    # ---------------------------------------------------------- Persistenz
+    @property
+    def symbols(self) -> list[str]:
+        return sorted(self.templates)
+
+    def __len__(self) -> int:
+        return sum(len(samples) for samples in self.templates.values())
+
+    def to_arrays(self) -> dict[str, np.ndarray]:
+        arrays: dict[str, np.ndarray] = {}
+        for symbol, samples in self.templates.items():
+            for index, sample in enumerate(samples):
+                arrays[f"{symbol}_{index}"] = sample.astype(np.uint8)
+        return arrays
+
+    def save(self, path: Path | None = None) -> Path:
+        target = Path(path) if path is not None else _default_template_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(target, **self.to_arrays())
+        return target
+
+    @classmethod
+    def load(cls, path: Path | None = None, size: int = 32) -> "TemplateBank":
+        source = Path(path) if path is not None else _default_template_path()
+        bank = cls(size=size)
+        with np.load(source) as data:
+            for key in data.files:
+                symbol, _, _index = key.partition("_")
+                if symbol not in PIECE_CLASSES:
+                    continue
+                bank.templates.setdefault(symbol, []).append(np.asarray(data[key], dtype=np.uint8))
+        return bank
 
 
 class PieceClassifier:
@@ -118,11 +222,16 @@ class PieceClassifier:
         occupancy_threshold: float = 18.0,
         min_confidence: float = 0.45,
         model_path: str | Path | None = None,
+        template_path: str | Path | None = None,
     ) -> None:
         self.occupancy_threshold = float(occupancy_threshold)
         self.min_confidence = float(min_confidence)
         self.templates = TemplateBank()
+        self.template_path = Path(template_path) if template_path else _default_template_path()
+        self.template_threshold = 0.78
+        self.template_error: str | None = None
         self.last_corrections: list[Correction] = []
+        self.reload_templates()
         self._svm = None
         self._scorer: SvmDecisionScorer | None = None
         self.model_error: str | None = None
@@ -132,6 +241,22 @@ class PieceClassifier:
         except (FileNotFoundError, RuntimeError, ValueError, cv2.error) as exc:
             self.model_error = str(exc)
             logger.error("Figurenmodell nicht verfügbar: %s", exc)
+
+    def reload_templates(self) -> int:
+        """Lädt gelernte Vorlagen des Benutzers (falls vorhanden)."""
+
+        try:
+            if not self.template_path.exists():
+                self.templates = TemplateBank()
+                return 0
+            self.templates = TemplateBank.load(self.template_path)
+            self.template_error = None
+            return len(self.templates)
+        except (OSError, ValueError, KeyError) as exc:
+            self.template_error = f"Vorlagen konnten nicht geladen werden: {exc}"
+            logger.warning(self.template_error)
+            self.templates = TemplateBank()
+            return 0
 
     def classify_square(
         self, square_img: np.ndarray
@@ -150,8 +275,8 @@ class PieceClassifier:
             return None, confidence, False, "empty", {}
 
         symbol, template_score = self.templates.match(square_img)
-        if symbol and template_score >= 0.72:
-            return chess.Piece.from_symbol(symbol), template_score, True, "template", {}
+        if symbol and template_score >= self.template_threshold:
+            return chess.Piece.from_symbol(symbol), template_score, True, "vorlage", {}
 
         prediction = self._svm_predict(square_img)
         if prediction is not None:

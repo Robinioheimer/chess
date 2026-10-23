@@ -87,6 +87,7 @@ from stockfish_vision.gui.worker import CaptureWorker, EngineWorker, Recognition
 from stockfish_vision.overlay.helper import HelperPopup
 from stockfish_vision.overlay.hotkey import WindowsHotkeyFilter
 from stockfish_vision.overlay.mapping import logical_rect_to_region
+from stockfish_vision.overlay.screens import screen_rects as collect_screen_rects
 from stockfish_vision.overlay.selector import RegionSelection
 from stockfish_vision.overlay.topmost import TopmostKeeper, ensure_topmost
 from stockfish_vision.overlay.window import OverlayWindow
@@ -342,7 +343,14 @@ class MainWindow(QMainWindow):
         self.recognition_worker.request_configure.connect(
             self.recognition_worker.configure, Qt.ConnectionType.QueuedConnection
         )
+        self.recognition_worker.request_learn.connect(
+            self.recognition_worker.learn, Qt.ConnectionType.QueuedConnection
+        )
+        self.recognition_worker.request_reload_templates.connect(
+            self.recognition_worker.reload_templates, Qt.ConnectionType.QueuedConnection
+        )
         self.recognition_worker.finished.connect(self._on_recognition)
+        self.recognition_worker.learned.connect(self._on_templates_learned)
         self.recognition_worker.failed.connect(self._on_recognition_error)
         self.recognition_thread.start()
 
@@ -529,6 +537,12 @@ class MainWindow(QMainWindow):
         popup_button.clicked.connect(self._show_helper)
         pick_button = QPushButton("Ausschnitt mit der Maus wählen")
         pick_button.clicked.connect(self._select_region_with_mouse)
+        self.start_learn_button = QPushButton("Figurensatz anlernen")
+        self.start_learn_button.setToolTip(
+            "Einmalig: Grundstellung der Seite zeigen, Snapshot aufnehmen, anlernen – "
+            "danach erkennt das Programm die echten Figuren dieses Designs."
+        )
+        self.start_learn_button.clicked.connect(self._learn_templates)
         self.start_track_button = QPushButton("Live-Tracking starten")
         self.start_track_button.setToolTip(
             "Erkennt Stellungsänderungen im Brettrahmen automatisch – ohne Engine-Aufruf."
@@ -544,6 +558,7 @@ class MainWindow(QMainWindow):
         quick_layout.addWidget(popup_button)
         quick_layout.addWidget(pick_button)
         quick_layout.addWidget(self.start_track_button)
+        quick_layout.addWidget(self.start_learn_button)
         quick_layout.addWidget(overlay_test)
         quick_layout.addWidget(overlay_toggle)
         quick_layout.addWidget(settings_button)
@@ -906,6 +921,22 @@ class MainWindow(QMainWindow):
         recognition_form.addRow("Belegungsschwelle (Std.-Abw.)", self.occupancy_spin)
         recognition_form.addRow("Warnschwelle Konfidenz", self.confidence_spin)
         recognition_form.addRow("Live-Tracking-Intervall", self.track_interval_spin)
+        self.btn_learn_templates = QPushButton("Figurensatz anlernen (Grundstellung)")
+        self.btn_learn_templates.setToolTip(
+            "Zeigt die Grundstellung der Seite, nimmt einen Snapshot auf und lernt die "
+            "echten Figuren dieses Designs – deutlich treffsicherer als das generische Modell."
+        )
+        self.btn_learn_templates.clicked.connect(self._learn_templates)
+        self.btn_clear_templates = QPushButton("Gelernte Figurenvorlagen löschen")
+        self.btn_clear_templates.clicked.connect(self._clear_templates)
+        self.template_status = QLabel("Keine gelernten Vorlagen.")
+        self.template_status.setWordWrap(True)
+        self.template_status.setStyleSheet("color:#5b6067;")
+        template_row = QHBoxLayout()
+        template_row.addWidget(self.btn_learn_templates)
+        template_row.addWidget(self.btn_clear_templates)
+        recognition_form.addRow("Eigener Figurensatz", template_row)
+        recognition_form.addRow(self.template_status)
         recognition_form.addRow(apply_recognition)
 
         overlay_group = QGroupBox("Overlay und Brettrahmen")
@@ -1143,6 +1174,7 @@ class MainWindow(QMainWindow):
         self.model_path_edit.setText(self.config.model_path)
         self.occupancy_spin.setValue(self.config.occupancy_std_threshold)
         self.confidence_spin.setValue(self.config.min_piece_confidence)
+        self._refresh_template_status()
         self.track_interval_spin.blockSignals(True)
         self.track_interval_spin.setValue(self.config.capture.tracking_interval_ms)
         self.track_interval_spin.blockSignals(False)
@@ -1362,6 +1394,91 @@ class MainWindow(QMainWindow):
             self.config.model_path,
         )
         self.statusBar().showMessage("Erkennungseinstellungen angewendet; Session-Templates bleiben bei gleichem Modell erhalten.")
+
+    # -------------------------------------------------- Eigener Figurensatz
+    def _template_file(self) -> Path:
+        from stockfish_vision.recognition.calibrate import template_path
+
+        return template_path()
+
+    def _refresh_template_status(self) -> None:
+        if not hasattr(self, "template_status"):
+            return
+        path = self._template_file()
+        try:
+            exists = path.exists()
+        except OSError:
+            exists = False
+        if exists:
+            self.template_status.setText(
+                f"Eigene Vorlagen aktiv ({path.name}). Die Erkennung nutzt sie vor dem Modell."
+            )
+        else:
+            self.template_status.setText(
+                "Keine gelernten Vorlagen – es gilt das mitgelieferte Modell. "
+                "Für chess.com/lichess einmal die Grundstellung anlernen."
+            )
+
+    def _learn_templates(self) -> None:
+        if self.last_frame is None:
+            self.tabs.setCurrentWidget(self.capture_tab)
+            self.capture_status.setText(
+                "Zum Anlernen: Grundstellung der Seite anzeigen, Bereich wählen und "
+                "Snapshot aufnehmen – danach „Figurensatz anlernen“ erneut klicken."
+            )
+            QMessageBox.information(
+                self,
+                "Figurensatz anlernen",
+                "So lernt das Programm die echten Figuren:\n\n"
+                "1. Auf der Seite die Grundstellung anzeigen (alle Figuren auf ihren Startfeldern).\n"
+                "2. Bereich um das Brett wählen und Snapshot aufnehmen.\n"
+                "3. Rahmen prüfen und „Figurensatz anlernen“ erneut klicken.\n\n"
+                "Danach erkennt das Programm genau dieses Figurendesign.",
+            )
+            return
+        if len(self.corners) != 4:
+            QMessageBox.information(
+                self,
+                "Figurensatz anlernen",
+                "Bitte zuerst den Brettrahmen setzen – automatisch einrahmen oder vier Ecken klicken.",
+            )
+            return
+        try:
+            warped, _ = warp_board(self.last_frame, self.corners, self.config.capture.warp_size)
+        except (ValueError, cv2.error) as exc:
+            QMessageBox.warning(self, "Figurensatz anlernen", str(exc))
+            return
+        self.capture_status.setText(
+            "Figurensatz wird angelernt: linke und rechte Grundreihe werden als Vorlagen gespeichert …"
+        )
+        self.recognition_worker.request_learn.emit(
+            warped, self.orientation_combo.currentText()
+        )
+
+    def _on_templates_learned(self, report) -> None:
+        self._refresh_template_status()
+        summary = getattr(report, "summary", lambda: "Vorlagen gespeichert.")()
+        self.statusBar().showMessage(f"Figurensatz gelernt: {summary}", 15_000)
+        self.capture_status.setText(
+            f"Figurensatz gelernt ({summary}). Die Erkennung nutzt jetzt diese Vorlagen."
+        )
+        if self.last_frame is not None and len(self.corners) == 4:
+            self._recognize_snapshot()
+
+    def _clear_templates(self) -> None:
+        path = self._template_file()
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Figurensatz", f"Vorlagen konnten nicht gelöscht werden: {exc}"
+            )
+            return
+        self.recognition_worker.request_reload_templates.emit()
+        self._refresh_template_status()
+        self.capture_status.setText(
+            "Gelernte Figurenvorlagen gelöscht. Es gilt wieder das mitgelieferte Modell."
+        )
 
     # --------------------------------------------------------------- Capture
     def _refresh_monitors(self) -> None:
@@ -2244,20 +2361,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------- Ausschnitt per Maus
     @staticmethod
-    def _screen_rects() -> list[tuple[float, float, float, float, float]]:
-        rects: list[tuple[float, float, float, float, float]] = []
-        for screen in QGuiApplication.screens():
-            geometry = screen.geometry()
-            rects.append(
-                (
-                    float(geometry.x()),
-                    float(geometry.y()),
-                    float(geometry.width()),
-                    float(geometry.height()),
-                    float(screen.devicePixelRatio()) or 1.0,
-                )
-            )
-        return rects
+    def _screen_rects():
+        """Logische und physische Rechtecke je Monitor – siehe overlay.screens."""
+        return collect_screen_rects()
 
     def _select_region_with_mouse(self) -> None:
         if self.selector is None:

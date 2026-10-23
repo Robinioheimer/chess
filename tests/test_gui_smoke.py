@@ -220,14 +220,14 @@ def test_main_window_mouse_region_flow_with_helper_popup(app, monkeypatch) -> No
         app.processEvents()
 
 
-def test_version_is_v7() -> None:
+def test_version_is_v8() -> None:
     from stockfish_vision.version import APP_VERSION, VERSION_HISTORY, full_version_label
 
-    assert APP_VERSION == "v7"
-    assert "v7" in full_version_label()
+    assert APP_VERSION == "v8"
+    assert "v8" in full_version_label()
     labels = [label for label, _text in VERSION_HISTORY]
-    assert labels[-1] == "v7"
-    assert labels == ["v1", "v2", "v4", "v5", "v6", "v7"]
+    assert labels[-1] == "v8"
+    assert labels == ["v1", "v2", "v4", "v5", "v6", "v7", "v8"]
 
 
 def test_popup_width_is_configurable_and_persisted(app, monkeypatch) -> None:
@@ -452,3 +452,59 @@ def test_automatic_corrections_are_reported(app, monkeypatch) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_template_buttons_and_status(app, monkeypatch, tmp_path) -> None:
+
+    window = _tracking_window(app, monkeypatch)
+    template_file = tmp_path / "templates.npz"
+    window._template_file = lambda: template_file
+    try:
+        window._refresh_template_status()
+        assert "Keine gelernten Vorlagen" in window.template_status.text()
+        assert window.btn_learn_templates.isEnabled()
+        assert window.btn_clear_templates.isEnabled()
+
+        template_file.write_bytes(b"dummy")
+        window._refresh_template_status()
+        assert "Eigene Vorlagen aktiv" in window.template_status.text()
+
+        window._clear_templates()
+        assert not template_file.exists()
+        assert "Keine gelernten Vorlagen" in window.template_status.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_screen_rects_use_physical_monitor_boxes(app, monkeypatch) -> None:
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QGuiApplication
+
+    from stockfish_vision.capture.screen import MonitorInfo
+    from stockfish_vision.gui import main_window as module
+
+    class FakeScreen:
+        def __init__(self, rect: QRect, ratio: float) -> None:
+            self._rect = rect
+            self._ratio = ratio
+
+        def geometry(self) -> QRect:
+            return self._rect
+
+        def devicePixelRatio(self) -> float:
+            return self._ratio
+
+    screens = [FakeScreen(QRect(0, 0, 1536, 864), 1.25)]
+    monkeypatch.setattr(QGuiApplication, "screens", staticmethod(lambda: screens))
+    from stockfish_vision.capture import screen as screen_module
+
+    monkeypatch.setattr(
+        screen_module,
+        "list_monitors",
+        lambda: [MonitorInfo(1, 0, 0, 1920, 1080, "Testmonitor")],
+    )
+    rects = module.MainWindow._screen_rects()
+    assert len(rects) == 1
+    assert len(rects[0]) == 8  # logisch + physisch
+    assert rects[0][4:8] == (0.0, 0.0, 1920.0, 1080.0)

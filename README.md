@@ -1,10 +1,12 @@
-# Stockfish Vision Chess AI – **v7**
+# Stockfish Vision Chess AI – **v8**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
 
+Neu in **v8**: **Eigener Figurensatz** – statt nur mit synthetischen Glyphen zu arbeiten, lernt das Programm die tatsächlich sichtbaren Figuren einmalig aus der **Grundstellung** an (Start-Tab oder *4 · Einstellungen → Eigener Figurensatz*) und speichert sie als Vorlagen. Gemessen am Standard-Figurensatz (cburnett) steigt die Trefferquote damit von **17 % auf über 90 %**. Außerdem sitzt der **rote Rahmen im Overlay** jetzt auch bei gemischter Windows-Skalierung und mehreren Monitoren korrekt: Die Umrechnung nutzt die physischen Monitorrechtecke statt der falschen Annahme „logischer Ursprung × DPI-Faktor“.
+
 Neu in **v7**: **Live-Tracking** – das Programm verfolgt den eingerahmten Brettbereich selbstständig: es nimmt in einem einstellbaren Intervall ein Bild auf, erkennt die Stellung neu, sobald sich sichtbar etwas geändert hat, und zieht Brett, Overlay und Historie mit. Die Engine bleibt dabei aus; analysiert wird weiterhin nur ein bewusst eingefrorener Snapshot. Außerdem eine **Plausibilitätskorrektur**: unmögliche Erkennungen wie zwei Könige einer Farbe, neun Bauern oder ein Bauer auf der Grundreihe werden automatisch auf die zweitbeste Klasse abgebildet – die Meldung „zu viele Könige“ blockiert die Analyse nicht mehr, und jede Korrektur wird im Prüf-Tab angezeigt.
 
-Neu in **v6**: Die Oberfläche ist jetzt **hell** – weißer Hintergrund, schwarzer Text, graue Akzente (Grün nur noch als Bedeutung „erledigt“, Rot/Orange nur für Warnungen). Die Ausschnitt-Auswahl legt für **jeden Monitor eine eigene Ebene** über den kompletten Bildschirm, sodass wirklich der ganze Desktop bedeckt ist. Die Zustimmung zum Trainingsmodus wird **automatisch** erteilt und nicht mehr per Checkbox abgefragt. Details unter [Versionen](#versionen-v1-v2-v4-v5-v6-v7-…).
+Neu in **v6**: Die Oberfläche ist jetzt **hell** – weißer Hintergrund, schwarzer Text, graue Akzente (Grün nur noch als Bedeutung „erledigt“, Rot/Orange nur für Warnungen). Die Ausschnitt-Auswahl legt für **jeden Monitor eine eigene Ebene** über den kompletten Bildschirm, sodass wirklich der ganze Desktop bedeckt ist. Die Zustimmung zum Trainingsmodus wird **automatisch** erteilt und nicht mehr per Checkbox abgefragt. Details unter [Versionen](#versionen-v1-v2-v4-v5-v6-v7-v8-…).
 
 Neu in **v5**: Die Ausschnitt-Auswahl deckt jetzt immer den **kompletten Desktop** ab (auch mehrere Monitore, negative Koordinaten und hohe Windows-Skalierung) – vorher konnte das Auswahlfenster kleiner als der Bildschirm sein. Das Helfer-Popup ist breiter, lässt sich **am rechten Rand ziehen** und merkt sich seine Breite.
 
@@ -35,7 +37,8 @@ Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Eng
 - geführter Start-Tab mit Statusübersicht und Overlay-Test
 - **Einrichtungs-Popup** (immer im Vordergrund) mit drei Schritten: Ausschnitt, Snapshot + Erkennen, Analysieren
 - **Live-Tracking**: erkennt Stellungsänderungen im Brettrahmen automatisch neu (Intervall einstellbar), Engine bleibt aus
-- **Plausibilitätskorrektur** der Erkennung: höchstens ein König je Seite, höchstens acht Bauern, keine Bauern auf der Grundreihe
+- **Plausibilitätskorrektur** der Erkennung: höchstens ein König je Seite, höchstens acht Bauern, maximal 16 Figuren je Seite, keine Bauern auf der Grundreihe
+- **Eigener Figurensatz**: einmaliges Anlernen der echten Figuren aus der Grundstellung, danach vorlagenbasierte Erkennung
 - **Bildschirmausschnitt per Maus** aufziehen: Abdunkelung, Auswahlrahmen mit Größenanzeige, `Esc` bricht ab
 - Vordergrund-Wächter, der Popup und Overlay regelmäßig wieder nach vorn holt
 - atomare JSON-Konfiguration, Sicherung defekter Konfigurationen und Protokolldateien
@@ -229,16 +232,28 @@ Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. 
 
 Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
 
-## Versionen (v1, v2, v4, v5, v6, v7, …)
+## Eigenen Figurensatz anlernen (empfohlen für chess.com & Co.)
+
+Das mitgelieferte Modell kennt nur die Zeichnungen des Programms. Für echte Screenshots – etwa chess.com oder lichess – ist der mitgelieferte Figurensatz zu verschieden. Deshalb einmalig anlernen:
+
+1. Auf der Schachseite die **Grundstellung** anzeigen (alle Figuren auf ihren Startfeldern).
+2. Ausschnitt um das Brett wählen und **Snapshot aufnehmen**; der Rahmen muss stimmen.
+3. **Figurensatz anlernen** klicken – im Start-Tab unter *Schnellzugriff* oder unter *4 · Einstellungen → Eigener Figurensatz*.
+
+Das Programm schneidet die 32 Figuren frei, normiert sie auf 32 × 32 Pixel und legt sie unter `%APPDATA%\StockfishVisionChessAI\templates\piece_templates.npz` ab. Ab dann prüft die Erkennung zuerst diese Vorlagen (Quelle „vorlage“ in der Tabelle) und greift nur bei Unsicherheit auf das Modell zurück. **Gelernte Figurenvorlagen löschen** entfernt die Datei wieder.
+
+> Der Vergleich ist größen- und positionsunabhängig, weil jede Figur auf ihre Bounding-Box beschnitten wird – ein anderes Brett-Layout oder eine andere Fenstergröße ändert die Trefferquote praktisch nicht. Wird der Figurensatz der Seite gewechselt (anderes Design/Theme), einmal neu anlernen.
+
+## Versionen (v1, v2, v4, v5, v6, v7, v8, …)
 
 Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
 
-- im Fenstertitel (`Stockfish Vision Chess AI v7 – Trainingsmodus`),
+- im Fenstertitel (`Stockfish Vision Chess AI v8 – Trainingsmodus`),
 - im Titel des Einrichtungs-Popups,
 - groß im Start-Tab,
 - unter **Hilfe → Version / Info** samt Änderungsliste.
 
-Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v7"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
+Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v8"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
 
 - `v1` – Grundfassung
 - `v2` – Start-Tab, Größen/Schrift, roter Rahmen, Overlay-DPI
@@ -246,6 +261,7 @@ Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v7"`) und ein neuer 
 - `v5` – Größenkorrektur: Auswahl über den ganzen Desktop, Popup breiter und frei skalierbar
 - `v6` – helles Design (Weiß/Grau/Schwarz), Auswahl-Ebene je Monitor über den ganzen Bildschirm, automatische Trainings-Zustimmung
 - `v7` – Live-Tracking der Bildschirmstellung ohne Engine-Automatik, Plausibilitätskorrektur gegen „zu viele Könige“ und ähnliche Fehlererkennungen
+- `v8` – eigener Figurensatz lernbar (echte Screenshots statt Glyphen), Overlay-Rahmen mit physischen Monitorrechtecken (gemischte DPI-Skalierung)
 
 > Hinweis zu den Formulierungen: Das Popup ersetzt nicht die Kalibrierung, sondern führt zu ihr hin – der Ausschnitt wird per Maus gesetzt, danach rastet die automatische Brettecken-Erkennung ein.
 
@@ -339,6 +355,8 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Auswahl-Ebene erreicht den Bildschirmrand nicht:** in v5 behoben. Sie bedeckt jetzt alle Monitore samt Rand. Das Log (`%APPDATA%\StockfishVisionChessAI\logs\`) protokolliert die tatsächliche Auswahlgröße.
 - **Popup zu schmal/breit:** rechten Fensterrand ziehen oder *4 · Einstellungen → Popup-Breite* setzen.
 - **Auswahl bedeckt nur einen Teil / einen Monitor:** in v6 behoben. Das Programm legt je Monitor eine eigene Auswahl-Ebene an; das Log nennt Anzahl und Rechtecke der Ebenen. Bleibt eine Stelle unbedeckt, Skalierung prüfen und erneut starten.
+- **Figuren werden falsch erkannt (z. B. bei chess.com):** in v8 über das Anlernen gelöst. Einmal die Grundstellung zeigen, Snapshot aufnehmen und **Figurensatz anlernen** klicken. Ohne diesen Schritt arbeitet nur das generische Modell, das auf fremde Figurendesigns schlecht passt.
+- **Roter Rahmen im Overlay sitzt versetzt:** in v8 behoben. Die Umrechnung nutzt jetzt logische *und* physische Monitorrechtecke; bei gemischter Skalierung stimmt der Rahmen auch auf dem zweiten Monitor. Bleibt eine Restverschiebung, *4 · Einstellungen → DPI-Korrektur* auf „automatisch“ (0) stellen und das Log prüfen – es nennt die erkannten Monitorrechtecke.
 - **„Zu viele Könige auf dem Brett“ / ungültige Figurenzahl:** in v7 behoben. Die Erkennung korrigiert höchstens einen König je Seite (Stammfeld e1/e8 bzw. Grundreihe gewinnt), kappt Bauern auf acht und ersetzt Bauern auf der Grundreihe. Jede Änderung steht als „Plausibilität korrigiert: feld: alt → neu“ im Prüf-Tab; bleibt die Stellung danach ungültig, das betroffene Feld per Klick korrigieren.
 - **Live-Tracking reagiert nicht:** Es braucht einen eingerahmten Brettbereich (vier Ecken) und eine sichtbare Änderung am Brett. Ist der Rahmen gesetzt und passiert nichts, das Intervall unter *4 · Einstellungen → Live-Tracking-Intervall* kleiner stellen; bei Dauerregen von Fehlalarmen größer. Bei starker Bewegung im Bild (Videos, Animationen) die Belegungsschwelle erhöhen.
 - **Live-Tracking erkennt, aber die Engine bleibt still:** Das ist beabsichtigt. Das Tracking ruft die Engine nie selbst auf; für eine Bewertung **Snapshot aufnehmen und einfrieren** und diesen analysieren.
