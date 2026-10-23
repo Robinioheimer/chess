@@ -1,8 +1,41 @@
-"""Umrechnung zwischen Aufnahme- und Qt-Koordinaten (ohne Qt-Abhängigkeit)."""
+"""Umrechnung zwischen Aufnahme- und Qt-Koordinaten (ohne Qt-Abhängigkeit).
+
+Windows liefert Bildschirmaufnahmen in **physischen** Pixeln, Qt rechnet
+dagegen in **logischen** Pixeln. Bei 125/150/200 % Skalierung – und erst recht
+mit mehreren Monitoren unterschiedlicher Skalierung – ist der physische
+Ursprung eines Monitors nicht einfach ``logischer_Ursprung * Faktor``.
+
+Deshalb akzeptiert dieses Modul pro Bildschirm entweder
+
+* ``(x, y, breite, hoehe, dpi_faktor)`` – logische Werte, Faktor geschätzt, oder
+* ``(lx, ly, lw, lh, px, py, pw, ph)`` – logische **und** physische Werte.
+
+Mit beiden Rechtecken wird pro Monitor ein exakter linearer Bezug hergestellt:
+``logisch = lx + (physisch - px) * lw / pw``. Das ist der einzige Weg, der auch
+bei gemischter Skalierung und negativen Koordinaten stimmt.
+"""
 
 from __future__ import annotations
 
-ScreenRect = tuple[float, float, float, float, float]
+ScreenRect = tuple[float, ...]
+
+
+def _unpack(rect: ScreenRect) -> tuple[float, float, float, float, float, float, float, float]:
+    """Liefert (lx, ly, lw, lh, px, py, pw, ph) für beide Tupelformen."""
+    values = tuple(float(value) for value in rect)
+    if len(values) >= 8:
+        lx, ly, lw, lh, px, py, pw, ph = values[:8]
+        return lx, ly, lw, lh, px, py, pw, ph
+    lx, ly, lw, lh = values[:4]
+    factor = values[4] if len(values) > 4 and values[4] > 0 else 1.0
+    return lx, ly, lw, lh, lx * factor, ly * factor, lw * factor, lh * factor
+
+
+def _scales(rect: ScreenRect) -> tuple[float, float, float, float, float, float, float, float]:
+    lx, ly, lw, lh, px, py, pw, ph = _unpack(rect)
+    scale_x = lw / pw if pw > 0 else 1.0
+    scale_y = lh / ph if ph > 0 else 1.0
+    return lx, ly, lw, lh, px, py, scale_x, scale_y
 
 
 def physical_to_logical(
@@ -10,29 +43,24 @@ def physical_to_logical(
     y: float,
     screens: list[ScreenRect],
 ) -> tuple[float, float]:
-    """Rechnet Aufnahmekoordinaten (physische Pixel) in Qt-Logikpixel um.
+    """Rechnet Aufnahmekoordinaten (physische Pixel) in Qt-Logikpixel um."""
 
-    ``screens`` enthält je Bildschirm ``(x, y, breite, hoehe, dpi_faktor)`` in
-    logischen Koordinaten. Windows liefert Bildschirmaufnahmen in physischen
-    Pixeln, Qt-Fenster dagegen in logischen Pixeln. Ohne diese Umrechnung
-    landen Pfeile bei 125 %, 150 % oder 200 % Windows-Skalierung außerhalb des
-    sichtbaren Bereichs – das Overlay scheint dann nicht zu funktionieren.
-    """
+    for rect in screens:
+        lx, ly, lw, lh, px, py, scale_x, scale_y = _scales(rect)
+        if px <= x < px + lw / scale_x and py <= y < py + lh / scale_y:
+            return (lx + (x - px) * scale_x, ly + (y - py) * scale_y)
+    return float(x), float(y)
 
-    for logical_x, logical_y, logical_w, logical_h, dpr in screens:
-        factor = float(dpr) if dpr and float(dpr) > 0 else 1.0
-        physical_x = float(logical_x) * factor
-        physical_y = float(logical_y) * factor
-        physical_w = float(logical_w) * factor
-        physical_h = float(logical_h) * factor
-        if (
-            physical_x <= x < physical_x + physical_w
-            and physical_y <= y < physical_y + physical_h
-        ):
-            return (
-                float(logical_x) + (x - physical_x) / factor,
-                float(logical_y) + (y - physical_y) / factor,
-            )
+
+def logical_to_physical(
+    x: float, y: float, screens: list[ScreenRect]
+) -> tuple[float, float]:
+    """Umkehrung von :func:`physical_to_logical` für einen einzelnen Punkt."""
+
+    for rect in screens:
+        lx, ly, lw, lh, px, py, scale_x, scale_y = _scales(rect)
+        if lx <= x < lx + lw and ly <= y < ly + lh:
+            return (px + (x - lx) / scale_x, py + (y - ly) / scale_y)
     return float(x), float(y)
 
 
@@ -40,21 +68,11 @@ def scaled_to_logical(
     x: float, y: float, percent: int | float
 ) -> tuple[float, float]:
     """Manuelle Umrechnung mit festem Prozentfaktor (0 = keine Korrektur)."""
+
     factor = float(percent) / 100.0 if percent else 1.0
     if factor <= 0:
         factor = 1.0
     return x / factor, y / factor
-
-
-def logical_to_physical(
-    x: float, y: float, screens: list[ScreenRect]
-) -> tuple[float, float]:
-    """Umkehrung von :func:`physical_to_logical` für einen einzelnen Punkt."""
-    for logical_x, logical_y, logical_w, logical_h, dpr in screens:
-        if logical_x <= x < logical_x + logical_w and logical_y <= y < logical_y + logical_h:
-            factor = float(dpr) if dpr and float(dpr) > 0 else 1.0
-            return float(x) * factor, float(y) * factor
-    return float(x), float(y)
 
 
 def logical_rect_to_region(
@@ -65,8 +83,7 @@ def logical_rect_to_region(
     """Wandelt ein mit der Maus aufgezogenes Rechteck in einen Aufnahmebereich um.
 
     ``rect`` ist ``(x, y, breite, hoehe)`` in Qt-Logikpixeln (globale Koordinaten).
-    Rückgabe sind physische Bildschirmpixel für ``mss`` – passend zum Monitor,
-    auf dem der Mittelpunkt des Rechtecks liegt. Zu kleine Flächen ergeben ``None``.
+    Rückgabe sind physische Bildschirmpixel für ``mss``.
     """
 
     x, y, width, height = (float(value) for value in rect)
@@ -74,15 +91,25 @@ def logical_rect_to_region(
         return None
     center_x = x + width / 2.0
     center_y = y + height / 2.0
-    factor = 1.0
-    for logical_x, logical_y, logical_w, logical_h, dpr in screens:
-        if logical_x <= center_x < logical_x + logical_w and logical_y <= center_y < logical_y + logical_h:
-            factor = float(dpr) if dpr and float(dpr) > 0 else 1.0
+    target = None
+    for index, screen in enumerate(screens):
+        lx, ly, lw, lh = screen[:4]
+        lx, ly, lw, lh = float(lx), float(ly), float(lw), float(lh)
+        if lx <= center_x < lx + lw and ly <= center_y < ly + lh:
+            target = index
             break
-    left = round(x * factor)
-    top = round(y * factor)
-    physical_width = round(width * factor)
-    physical_height = round(height * factor)
+    if target is None:
+        target = 0 if screens else None
+    if target is None:
+        left, top = round(x), round(y)
+        physical_width, physical_height = round(width), round(height)
+    else:
+        left_px, top_px = logical_to_physical(x, y, screens)
+        right_px, bottom_px = logical_to_physical(x + width, y + height, screens)
+        left = round(left_px)
+        top = round(top_px)
+        physical_width = round(right_px - left_px)
+        physical_height = round(bottom_px - top_px)
     if physical_width < minimum or physical_height < minimum:
         return None
     return {
@@ -97,6 +124,7 @@ def region_to_logical_rect(
     region: dict[str, int], screens: list[ScreenRect]
 ) -> tuple[float, float, float, float] | None:
     """Umkehrung: gespeicherter Aufnahmebereich in Qt-Logikpixel."""
+
     try:
         left = float(region["left"])
         top = float(region["top"])
@@ -104,15 +132,6 @@ def region_to_logical_rect(
         height = float(region["height"])
     except (KeyError, TypeError, ValueError):
         return None
-    center_x = left + width / 2.0
-    center_y = top + height / 2.0
-    for logical_x, logical_y, logical_w, logical_h, dpr in screens:
-        factor = float(dpr) if dpr and float(dpr) > 0 else 1.0
-        physical_x = logical_x * factor
-        physical_y = logical_y * factor
-        if (
-            physical_x <= center_x < physical_x + logical_w * factor
-            and physical_y <= center_y < physical_y + logical_h * factor
-        ):
-            return (left / factor, top / factor, width / factor, height / factor)
-    return (left, top, width, height)
+    x0, y0 = physical_to_logical(left, top, screens)
+    x1, y1 = physical_to_logical(left + width, top + height, screens)
+    return (x0, y0, x1 - x0, y1 - y0)

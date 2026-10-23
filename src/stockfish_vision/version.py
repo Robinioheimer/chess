@@ -8,7 +8,7 @@ Die Nummer erscheint im Fenstertitel, im Start-Tab und unter *Hilfe → Version*
 from __future__ import annotations
 
 APP_NAME = "Stockfish Vision Chess AI"
-APP_VERSION = "v7"
+APP_VERSION = "v8"
 APP_VERSION_SUFFIX = ""  # z. B. "-beta", leer für eine reguläre Fassung
 
 VERSION_HISTORY: tuple[tuple[str, str], ...] = (
@@ -48,6 +48,14 @@ VERSION_HISTORY: tuple[tuple[str, str], ...] = (
         "erkannt, Overlay und Historie ziehen mit (Engine bleibt aus, Analyse nur auf Klick). "
         "Plausibilitätskorrektur verhindert ungültige Stellungen wie mehrere Könige oder "
         "mehr als acht Bauern und zeigt jede Korrektur im Prüf-Tab.",
+    ),
+    (
+        "v8",
+        "Eigener Figurensatz: Die tatsächlich sichtbaren Figuren werden einmalig aus der "
+        "Grundstellung angelernt und als Vorlagen gespeichert – die Erkennung wird dadurch "
+        "auch bei echten Screenshots treffsicher. Overlay-Rahmen rechnet jetzt mit den "
+        "physischen Monitorrechtecken und sitzt auch bei gemischter Windows-Skalierung "
+        "und mehreren Monitoren korrekt.",
     ),
 )
 

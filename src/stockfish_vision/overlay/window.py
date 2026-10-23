@@ -21,7 +21,8 @@ from stockfish_vision.board.geometry import (
 )
 from stockfish_vision.config import OverlaySettings
 from stockfish_vision.engine.client import AnalysisResult
-from stockfish_vision.overlay.mapping import ScreenRect, physical_to_logical, scaled_to_logical
+from stockfish_vision.overlay.mapping import physical_to_logical, scaled_to_logical
+from stockfish_vision.overlay.screens import screen_rects as collect_screen_rects
 
 logger = logging.getLogger(__name__)
 
@@ -454,21 +455,9 @@ class OverlayWindow(QWidget):
 
     # ----------------------------------------------------------- Koordinaten
     @staticmethod
-    def _screen_rects() -> list[ScreenRect]:
-        rects: list[tuple[float, float, float, float, float]] = []
-        for screen in QGuiApplication.screens():
-            geometry = screen.geometry()
-            dpr = float(screen.devicePixelRatio()) or 1.0
-            rects.append(
-                (
-                    float(geometry.x()),
-                    float(geometry.y()),
-                    float(geometry.width()),
-                    float(geometry.height()),
-                    dpr,
-                )
-            )
-        return rects
+    def _screen_rects():
+        """Logische und physische Rechtecke je Monitor – siehe overlay.screens."""
+        return collect_screen_rects()
 
     def _to_local(self, point: tuple[float, float]) -> tuple[float, float]:
         physical_x = float(point[0]) + self.origin[0]
