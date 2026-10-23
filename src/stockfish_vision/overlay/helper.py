@@ -36,6 +36,7 @@ class HelperPopup(QWidget):
 
     select_region_requested = Signal()
     snapshot_requested = Signal()
+    tracking_toggled = Signal()
     analyze_requested = Signal()
     settings_requested = Signal()
     overlay_test_requested = Signal()
@@ -105,6 +106,14 @@ class HelperPopup(QWidget):
         layout.addWidget(self.select_button)
 
         action_row = QHBoxLayout()
+        self.track_button = QPushButton("Live-Tracking starten")
+        self.track_button.setToolTip(
+            "Erkennt die Stellung laufend neu, ohne die Engine aufzurufen. "
+            "Für eine Analyse den Snapshot einfrieren."
+        )
+        self.track_button.clicked.connect(self.tracking_toggled.emit)
+        layout.addWidget(self.track_button)
+
         self.snapshot_button = QPushButton("Snapshot + erkennen")
         self.snapshot_button.clicked.connect(self.snapshot_requested.emit)
         self.analyze_button = QPushButton("Analysieren")
@@ -201,6 +210,18 @@ class HelperPopup(QWidget):
     def _hide_by_user(self) -> None:
         self.hide()
         self.hidden_by_user.emit()
+
+    def set_tracking(self, active: bool) -> None:
+        """Zeigt an, ob das Live-Tracking gerade läuft."""
+        self.track_button.setText(
+            "Live-Tracking stoppen" if active else "Live-Tracking starten"
+        )
+        self.track_button.setStyleSheet(
+            "QPushButton { background:#111214; color:#ffffff; font-weight:600; }"
+            "QPushButton:hover { background:#2a2d31; }"
+            if active
+            else ""
+        )
 
     def describe_state(self) -> str:
         return (

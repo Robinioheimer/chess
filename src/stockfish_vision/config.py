@@ -50,6 +50,7 @@ class CaptureSettings:
     warp_size: int = 640
     change_threshold: float = 8.0
     auto_frame: bool = True
+    tracking_interval_ms: int = 1000
 
 
 @dataclass
