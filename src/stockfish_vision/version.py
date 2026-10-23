@@ -8,7 +8,7 @@ Die Nummer erscheint im Fenstertitel, im Start-Tab und unter *Hilfe → Version*
 from __future__ import annotations
 
 APP_NAME = "Stockfish Vision Chess AI"
-APP_VERSION = "v4"
+APP_VERSION = "v5"
 APP_VERSION_SUFFIX = ""  # z. B. "-beta", leer für eine reguläre Fassung
 
 VERSION_HISTORY: tuple[tuple[str, str], ...] = (
@@ -29,6 +29,12 @@ VERSION_HISTORY: tuple[tuple[str, str], ...] = (
         "Vollbild-Auswahl des Bildschirmausschnitts mit der Maus, kleines Helfer-Fenster "
         "für die drei Schritte, dauerhaft im Vordergrund inklusive Wächter, "
         "vollständig per Maus statt Pixelwerten.",
+    ),
+    (
+        "v5",
+        "Größenkorrektur: Die Ausschnitt-Auswahl deckt jetzt garantiert den gesamten "
+        "Desktop ab (auch mehrere Monitore und hohe Windows-Skalierung), und das "
+        "Helfer-Popup ist breiter, an der Kante frei skalierbar und merkt sich seine Größe.",
     ),
 )
 

@@ -61,6 +61,7 @@ class UiSettings:
     helper_visible: bool = True
     helper_x: int = -1
     helper_y: int = -1
+    helper_width: int = 460
     helper_topmost: bool = True
 
 
@@ -148,6 +149,7 @@ class AppConfig:
         self.ui.helper_visible = bool(self.ui.helper_visible)
         self.ui.helper_x = _bounded_int(self.ui.helper_x, -20_000, 20_000, -1)
         self.ui.helper_y = _bounded_int(self.ui.helper_y, -20_000, 20_000, -1)
+        self.ui.helper_width = _bounded_int(self.ui.helper_width, 340, 1400, 460)
         self.ui.helper_topmost = bool(self.ui.helper_topmost)
 
         self.occupancy_std_threshold = _bounded_float(

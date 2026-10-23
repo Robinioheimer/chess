@@ -220,11 +220,46 @@ def test_main_window_mouse_region_flow_with_helper_popup(app, monkeypatch) -> No
         app.processEvents()
 
 
-def test_version_is_v4() -> None:
+def test_version_is_v5() -> None:
     from stockfish_vision.version import APP_VERSION, VERSION_HISTORY, full_version_label
 
-    assert APP_VERSION == "v4"
-    assert "v4" in full_version_label()
+    assert APP_VERSION == "v5"
+    assert "v5" in full_version_label()
     labels = [label for label, _text in VERSION_HISTORY]
-    assert labels[-1] == "v4"
-    assert "v3" not in labels
+    assert labels[-1] == "v5"
+    assert labels == ["v1", "v2", "v4", "v5"]
+
+
+def test_popup_width_is_configurable_and_persisted(app, monkeypatch) -> None:
+    from stockfish_vision.capture.screen import MonitorInfo
+    from stockfish_vision.config import AppConfig
+    from stockfish_vision.gui import main_window as module
+
+    monkeypatch.setattr(
+        module, "list_monitors", lambda: [MonitorInfo(1, 0, 0, 1200, 900, "Testmonitor")]
+    )
+    monkeypatch.setattr(module.WindowsHotkeyFilter, "register", lambda self: None)
+    monkeypatch.setattr(module, "save_config", lambda config, path=None: None)
+
+    config = AppConfig()
+    config.overlay.visible = False
+    config.ui.helper_width = 620
+    window = module.MainWindow(config)
+    try:
+        assert window.helper.width() == 620
+        assert window.popup_width_spin.value() == 620
+
+        window.popup_width_spin.setValue(760)
+        assert window.helper.width() == 760
+        assert window.config.ui.helper_width == 760
+
+        # Ziehen am Rand meldet die neue Breite zurück in die Konfiguration.
+        window.helper.size_changed.emit(520)
+        assert window.config.ui.helper_width == 520
+        assert window.popup_width_spin.value() == 520
+
+        window._persist_config()
+        assert window.config.ui.helper_width == 520
+    finally:
+        window.close()
+        app.processEvents()

@@ -1,6 +1,8 @@
-# Stockfish Vision Chess AI – **v4**
+# Stockfish Vision Chess AI – **v5**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
+
+Neu in **v5**: Die Ausschnitt-Auswahl deckt jetzt immer den **kompletten Desktop** ab (auch mehrere Monitore, negative Koordinaten und hohe Windows-Skalierung) – vorher konnte das Auswahlfenster kleiner als der Bildschirm sein. Das Helfer-Popup ist breiter, lässt sich **am rechten Rand ziehen** und merkt sich seine Breite. Details unter [Versionen](#versionen-v1-v2-v4-v5-…).
 
 Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.) Details unter [Versionen](#versionen-v1-v2-v4-…).
 
@@ -96,13 +98,14 @@ Beim ersten Start:
 
 Beim Start erscheint oben rechts ein kleines Fenster **Brett einrichten** – unabhängig vom Hauptfenster und immer im Vordergrund. Es führt durch drei Schritte:
 
-1. **Ausschnitt wählen** – „Ausschnitt mit der Maus wählen“ drückt den Bildschirm kurz ab. Rahmen mit gedrückter linker Maustaste um das Spielfeld ziehen (Größe wird live angezeigt), `Esc` oder rechte Maustaste bricht ab. Danach wird der Bereich gespeichert, ein Snapshot aufgenommen, das Brett automatisch rot eingerahmt und die Figuren erkannt.
+1. **Ausschnitt wählen** – „Ausschnitt mit der Maus wählen“ drückt den **gesamten Desktop** ab (alle Monitore, mit 2 px Rand, damit auch der äußerste Bildschirmrand erreichbar bleibt). Rahmen mit gedrückter linker Maustaste um das Spielfeld ziehen (Größe wird live angezeigt), `Esc` oder rechte Maustaste bricht ab. Danach wird der Bereich gespeichert, ein Snapshot aufgenommen, das Brett automatisch rot eingerahmt und die Figuren erkannt.
 2. **Snapshot und erkennen** – „Snapshot + erkennen“ wiederholt die Aufnahme jederzeit; der Status nennt geprüfte und unsichere Felder.
 3. **Analysieren** – startet bei Bedarf zuerst die Engine und analysiert die geprüfte Stellung; Ergebnis erscheint im Panel und als Pfeile im Overlay.
 
 Bedienung des Popups:
 
-- Am Fenster ziehen verschiebt es; Position und Sichtbarkeit werden gespeichert.
+- Am Fenster ziehen verschiebt es; am rechten Rand ziehen ändert die Breite (340–1400 px). Alternativ *4 · Einstellungen → Popup-Breite*.
+- Position, Breite und Sichtbarkeit werden gespeichert.
 - **✕** oder **Ausblenden** blendet es aus; zurück über *Start → Popup einblenden*, `Strg+Umschalt+H` oder *Ansicht → Einrichtungs-Popup anzeigen*.
 - **Einstellungen** öffnet das Hauptfenster im Einstellungs-Tab, **Overlay testen** zeigt Rahmen und Demo-Pfeil ohne Engine.
 - Das Hauptfenster dient weiter zum Korrigieren von Feldern, für FEN/PGN und alle Detail-Einstellungen; es muss nicht im Vordergrund stehen.
@@ -219,11 +222,11 @@ Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. 
 
 Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
 
-## Versionen (v1, v2, v4, …)
+## Versionen (v1, v2, v4, v5, …)
 
 Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
 
-- im Fenstertitel (`Stockfish Vision Chess AI v4 – Trainingsmodus`),
+- im Fenstertitel (`Stockfish Vision Chess AI v5 – Trainingsmodus`),
 - im Titel des Einrichtungs-Popups,
 - groß im Start-Tab,
 - unter **Hilfe → Version / Info** samt Änderungsliste.
@@ -233,6 +236,7 @@ Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v5"`) und ein neuer 
 - `v1` – Grundfassung
 - `v2` – Start-Tab, Größen/Schrift, roter Rahmen, Overlay-DPI
 - `v4` – Popup-Einrichtung, Maus-Ausschnitt, Vordergrund-Wächter (**v3 übersprungen**)
+- `v5` – Größenkorrektur: Auswahl über den ganzen Desktop, Popup breiter und frei skalierbar
 
 > Hinweis zu den Formulierungen: Das Popup ersetzt nicht die Kalibrierung, sondern führt zu ihr hin – der Ausschnitt wird per Maus gesetzt, danach rastet die automatische Brettecken-Erkennung ein.
 
@@ -285,9 +289,9 @@ Dabei entsteht neben der XML eine JSON-Metadatendatei mit Klassen, HOG-Parameter
 .venv\Scripts\python.exe -m ruff check src tests scripts
 ```
 
-Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, automatische Brettecken-Erkennung, DPI-Umrechnung des Overlays, Maus-Ausschnitt inklusive DPI-Umrechnung, Popup-Zustände und Vordergrund-Wächter, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
+Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, automatische Brettecken-Erkennung, DPI-Umrechnung des Overlays, Maus-Ausschnitt inklusive DPI-Umrechnung, Desktop-Geometrie mehrerer Monitore, Popup-Zustände, Popup-Breite und Vordergrund-Wächter, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
 
-`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten, den Hauptfenster-Lebenszyklus, die automatische Einrahmung, den Overlay-Test, Fenster- und Schriftgröße sowie den kompletten Popup-Ablauf vom Maus-Ausschnitt bis zur Analyse. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
+`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten, den Hauptfenster-Lebenszyklus, die automatische Einrahmung, den Overlay-Test, Fenster- und Schriftgröße, die Popup-Breite sowie den kompletten Popup-Ablauf vom Maus-Ausschnitt bis zur Analyse. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
 
 Für den optionalen echten Stockfish-Integrationstest setzen Sie `STOCKFISH_PATH` auf die offizielle Binary und führen denselben Testbefehl aus. Dann wird zusätzlich `tests/test_stockfish_integration.py` ausgeführt; ohne diese Umgebungsvariable wird nur dieser optionale Test übersprungen. Der automatische Standardtest benötigt keinen Stockfish-Download.
 
@@ -323,6 +327,8 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Schrift zu klein/groß:** *4 · Einstellungen → Schriftgröße* oder `Strg ++` / `Strg +-`.
 - **Popup verschwunden:** `Strg+Umschalt+H` oder *Start → Popup einblenden*.
 - **Ausschnitt sitzt falsch:** erneut „Bereich mit der Maus wählen“; der Rahmen wird bei jeder Auswahl neu gesetzt.
+- **Auswahl-Ebene erreicht den Bildschirmrand nicht:** in v5 behoben. Sie bedeckt jetzt alle Monitore samt Rand. Das Log (`%APPDATA%\StockfishVisionChessAI\logs\`) protokolliert die tatsächliche Auswahlgröße.
+- **Popup zu schmal/breit:** rechten Fensterrand ziehen oder *4 · Einstellungen → Popup-Breite* setzen.
 - **Browser verdrängt Popup:** Fenstermodus statt `F11`-Vollbild verwenden; der Wächter holt das Popup alle zwei Sekunden zurück.
 
 ## Projektstruktur

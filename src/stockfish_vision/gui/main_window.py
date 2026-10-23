@@ -285,7 +285,9 @@ class MainWindow(QMainWindow):
         self.helper.settings_requested.connect(self._helper_open_settings)
         self.helper.overlay_test_requested.connect(self._test_overlay)
         self.helper.position_changed.connect(self._helper_moved)
+        self.helper.size_changed.connect(self._helper_resized)
         self.helper.hidden_by_user.connect(self._helper_hidden)
+        self.helper.apply_width(config.ui.helper_width)
         self._place_helper()
         self.helper.setVisible(config.ui.helper_visible)
         if config.ui.helper_visible:
@@ -813,6 +815,15 @@ class MainWindow(QMainWindow):
         preset_row.addStretch()
         self.maximized_check = QCheckBox("Beim Start maximiert")
         self.maximized_check.toggled.connect(self._set_start_maximized)
+        self.popup_width_spin = QSpinBox()
+        self.popup_width_spin.setRange(340, 1400)
+        self.popup_width_spin.setSingleStep(20)
+        self.popup_width_spin.setSuffix(" px")
+        self.popup_width_spin.setMaximumWidth(180)
+        self.popup_width_spin.setToolTip(
+            "Breite des Helfer-Popups. Alternativ am rechten Fensterrand ziehen."
+        )
+        self.popup_width_spin.valueChanged.connect(self._popup_width_changed)
         self.font_scale_slider = QSlider(Qt.Orientation.Horizontal)
         self.font_scale_slider.setRange(70, 200)
         self.font_scale_slider.setSingleStep(5)
@@ -829,6 +840,7 @@ class MainWindow(QMainWindow):
         display_form.addRow("Voreinstellungen", preset_row)
         display_form.addRow(self.maximized_check)
         display_form.addRow("Schriftgröße", font_row)
+        display_form.addRow("Popup-Breite", self.popup_width_spin)
 
         recognition_group = QGroupBox("Figurerkennung")
         recognition_form = QFormLayout(recognition_group)
@@ -1120,6 +1132,9 @@ class MainWindow(QMainWindow):
             self.maximized_action.blockSignals(True)
             self.maximized_action.setChecked(self.config.ui.start_maximized)
             self.maximized_action.blockSignals(False)
+        self.popup_width_spin.blockSignals(True)
+        self.popup_width_spin.setValue(self.config.ui.helper_width)
+        self.popup_width_spin.blockSignals(False)
         self.font_scale_slider.blockSignals(True)
         self.font_scale_slider.setValue(self.config.ui.font_scale_percent)
         self.font_scale_slider.blockSignals(False)
@@ -1155,6 +1170,7 @@ class MainWindow(QMainWindow):
         self.config.ui.window_width = self.window_width_spin.value()
         self.config.ui.window_height = self.window_height_spin.value()
         self.config.ui.font_scale_percent = self.font_scale_slider.value()
+        self.config.ui.helper_width = self.helper.panel_width()
         self.config.ui.start_maximized = self.maximized_check.isChecked()
         monitor_data = self.monitor_combo.currentData()
         self.config.capture.monitor_index = int(monitor_data) if monitor_data is not None else 1
@@ -1245,6 +1261,9 @@ class MainWindow(QMainWindow):
 
     def _adjust_font_scale(self, delta: int) -> None:
         self._apply_font_scale(self.config.ui.font_scale_percent + delta)
+
+    def _apply_popup_width(self, value: int) -> None:
+        self.popup_width_spin.setValue(self.helper.apply_width(value))
 
     def _apply_font_scale(self, percent: int, announce: bool = True, from_slider: bool = False) -> None:
         percent = clamp_font_scale(percent)
@@ -1953,6 +1972,22 @@ class MainWindow(QMainWindow):
         self._helper_offset = (int(x), int(y))
         self.config.ui.helper_x = int(x)
         self.config.ui.helper_y = int(y)
+
+    def _helper_resized(self, width: int) -> None:
+        value = self.helper.apply_width(width)
+        self.config.ui.helper_width = value
+        if hasattr(self, "popup_width_spin"):
+            self.popup_width_spin.blockSignals(True)
+            self.popup_width_spin.setValue(value)
+            self.popup_width_spin.blockSignals(False)
+        self.statusBar().showMessage(f"Popup-Breite: {value} px.")
+
+    def _popup_width_changed(self, value: int) -> None:
+        width = self.helper.apply_width(value)
+        self.config.ui.helper_width = width
+        if self.helper.isVisible():
+            self.helper.adjustSize()
+        self._refresh_overview()
 
     def _helper_hidden(self) -> None:
         self.config.ui.helper_visible = False

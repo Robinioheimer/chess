@@ -145,3 +145,45 @@ def test_topmost_keeper_tracks_and_clears_windows(app) -> None:
     keeper.stop()
     assert keeper.is_active() is False
     widget.close()
+
+
+def test_helper_popup_width_can_be_resized_and_clamped(app) -> None:
+    from stockfish_vision.overlay.helper import MAX_WIDTH, MIN_WIDTH, WIDTH
+
+    popup = HelperPopup("v5")
+    assert popup.width() == WIDTH
+    assert popup.apply_width(700) == 700
+    assert popup.width() == 700
+    assert popup.panel_width() == 700
+    assert popup.apply_width(10) == MIN_WIDTH
+    assert popup.apply_width(99_999) == MAX_WIDTH
+    assert popup.clamp_width("unsinn") == WIDTH
+    resize_events: list[int] = []
+    popup.size_changed.connect(resize_events.append)
+    popup.size_changed.emit(popup.width())
+    assert resize_events == [popup.width()]
+    popup.close()
+
+
+def test_helper_popup_resize_hit_zone(app) -> None:
+    popup = HelperPopup("v5")
+    popup.apply_width(400)
+    assert popup._is_resize_hit(QPoint(399, 20)) is True
+    assert popup._is_resize_hit(QPoint(200, 20)) is False
+    popup.close()
+
+
+def test_selector_covers_full_desktop_and_adds_edge_margin(app) -> None:
+    from stockfish_vision.overlay.selector import EDGE_MARGIN, RegionSelector, full_screen_geometry
+
+    expected = full_screen_geometry()
+    assert expected.isValid()
+    assert expected.width() > 0 and expected.height() > 0
+    selector = RegionSelector()
+    selector.start()
+    assert selector.geometry() == expected
+    assert selector.minimumWidth() >= expected.width()
+    assert selector.minimumHeight() >= expected.height()
+    screen = app.primaryScreen().geometry()
+    assert expected.width() >= screen.width() + 2 * EDGE_MARGIN
+    selector.close()

@@ -16,7 +16,10 @@ BORDER = QColor(90, 110, 125, 180)
 ACCENT = QColor(255, 45, 45)
 DONE = QColor(118, 216, 150)
 PENDING = QColor(140, 152, 162)
-WIDTH = 380
+WIDTH = 460
+MIN_WIDTH = 340
+MAX_WIDTH = 1400
+RESIZE_MARGIN = 10
 
 STEP_LABELS = (
     "1 · Ausschnitt wählen",
@@ -35,6 +38,7 @@ class HelperPopup(QWidget):
     overlay_test_requested = Signal()
     hidden_by_user = Signal()
     position_changed = Signal(int, int)
+    size_changed = Signal(int)
 
     def __init__(self, version: str = "v4", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -47,13 +51,16 @@ class HelperPopup(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         for button in self.findChildren(QPushButton):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(WIDTH)
+        self.setMinimumWidth(MIN_WIDTH)
         self.version = version
         self.step = 0
         self.status_text = "Ausschnitt wählen: Rahmen mit der Maus um das Spielfeld ziehen."
         self.busy = False
         self._drag_start: QPoint | None = None
         self._drag_origin: QPoint | None = None
+        self._resize_start: QPoint | None = None
+        self._resize_width = WIDTH
+        self.apply_width(WIDTH)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 24)
@@ -123,6 +130,28 @@ class HelperPopup(QWidget):
 
         self._refresh()
 
+    # ------------------------------------------------------------- Größe
+    @staticmethod
+    def clamp_width(width: int | float) -> int:
+        try:
+            value = int(width)
+        except (TypeError, ValueError):
+            return WIDTH
+        return max(MIN_WIDTH, min(MAX_WIDTH, value))
+
+    def apply_width(self, width: int | float) -> int:
+        value = self.clamp_width(width)
+        self.setFixedWidth(value)
+        self._resize_width = value
+        self.update()
+        return value
+
+    def panel_width(self) -> int:
+        return self.width()
+
+    def _is_resize_hit(self, position: QPoint) -> bool:
+        return position.x() >= self.width() - RESIZE_MARGIN
+
     # ------------------------------------------------------------- Zustand
     def set_step(
         self,
@@ -179,24 +208,51 @@ class HelperPopup(QWidget):
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        if self._is_resize_hit(event.position().toPoint()):
+            self._resize_start = event.globalPosition().toPoint()
+            self._resize_width = self.width()
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            event.accept()
+            return
         self._drag_start = event.globalPosition().toPoint()
         self._drag_origin = self.pos()
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._resize_start is not None:
+            delta = event.globalPosition().toPoint().x() - self._resize_start.x()
+            self.apply_width(self._resize_width + delta)
+            event.accept()
+            return
         if self._drag_start is None or self._drag_origin is None:
+            self.setCursor(
+                Qt.CursorShape.SizeHorCursor
+                if self._is_resize_hit(event.position().toPoint())
+                else Qt.CursorShape.ArrowCursor
+            )
             return
         delta = event.globalPosition().toPoint() - self._drag_start
         self.move(self._drag_origin + delta)
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if self._resize_start is not None:
+            self._resize_start = None
+            self.unsetCursor()
+            self.size_changed.emit(self.width())
+            event.accept()
+            return
         if self._drag_start is None:
             return
         self._drag_start = None
         self._drag_origin = None
         self.position_changed.emit(self.x(), self.y())
         event.accept()
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        if self._resize_start is None and self._drag_start is None:
+            self.unsetCursor()
+        super().leaveEvent(event)
 
     # ------------------------------------------------------------- Malen
     def paintEvent(self, event) -> None:  # type: ignore[override]
@@ -207,6 +263,15 @@ class HelperPopup(QWidget):
         painter.drawRoundedRect(QRect(0, 0, self.width() - 1, self.height() - 1), 12, 12)
         painter.setPen(QPen(ACCENT, 3))
         painter.drawLine(16, 2, 120, 2)
+        grip = QColor(120, 132, 144, 200)
+        painter.setPen(QPen(grip, 2))
+        for offset in (0, 5, 10):
+            painter.drawLine(
+                self.width() - 8 - offset,
+                self.height() - 14,
+                self.width() - 8,
+                self.height() - 14 - offset,
+            )
         painter.setPen(QColor(140, 152, 162))
         font = QFont("Segoe UI", 8)
         painter.setFont(font)

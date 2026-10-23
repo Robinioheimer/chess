@@ -38,6 +38,7 @@
     "helper_visible": true,
     "helper_x": -1,
     "helper_y": -1,
+    "helper_width": 460,
     "helper_topmost": true
   },
   "last_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
