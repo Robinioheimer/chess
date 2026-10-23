@@ -1,8 +1,8 @@
-# Stockfish Vision Chess AI – **v2**
+# Stockfish Vision Chess AI – **v4**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
 
-Neu in **v2**: übersichtlicher Start-Tab mit geführtem Ablauf, einstellbare Programmgröße und Schriftgröße, automatischer roter Brettrahmen (oder manuell per vier Klicks/Rechteck), robustes Overlay mit DPI-Korrektur und Overlay-Test. Details unter [Versionen](#versionen-v1-v2-…).
+Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.) Details unter [Versionen](#versionen-v1-v2-v4-…).
 
 Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Engine-Varianten. Ein transparentes Overlay stellt bei kalibrierten Snapshots farbige Pfeile und Feldmarkierungen dar. Das unabhängige Analyse-Panel ist verschieb- und skalierbar.
 
@@ -27,6 +27,9 @@ Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Eng
 - klickdurchlässige Pfeilebene, interaktives Overlay-Panel, DPI-Korrektur für Windows-Skalierung
 - einstellbare Fenstergröße (Voreinstellungen, freie Pixelwerte, maximierter Start) und Schriftgröße
 - geführter Start-Tab mit Statusübersicht und Overlay-Test
+- **Einrichtungs-Popup** (immer im Vordergrund) mit drei Schritten: Ausschnitt, Snapshot + Erkennen, Analysieren
+- **Bildschirmausschnitt per Maus** aufziehen: Abdunkelung, Auswahlrahmen mit Größenanzeige, `Esc` bricht ab
+- Vordergrund-Wächter, der Popup und Overlay regelmäßig wieder nach vorn holt
 - atomare JSON-Konfiguration, Sicherung defekter Konfigurationen und Protokolldateien
 
 ## Voraussetzungen
@@ -88,6 +91,23 @@ Beim ersten Start:
 1. **4 · Einstellungen** öffnen, `stockfish.exe` auswählen und **Engine starten** wählen.
 2. Für eine sofortige Funktionsprüfung unter **2 · Prüfen** die Grundstellung verwenden und **Trainingsstellung analysieren** wählen.
 3. Für Bilderkennung den folgenden Kalibrierungsworkflow ausführen.
+
+## Einrichtung über das Popup (v4)
+
+Beim Start erscheint oben rechts ein kleines Fenster **Brett einrichten** – unabhängig vom Hauptfenster und immer im Vordergrund. Es führt durch drei Schritte:
+
+1. **Ausschnitt wählen** – „Ausschnitt mit der Maus wählen“ drückt den Bildschirm kurz ab. Rahmen mit gedrückter linker Maustaste um das Spielfeld ziehen (Größe wird live angezeigt), `Esc` oder rechte Maustaste bricht ab. Danach wird der Bereich gespeichert, ein Snapshot aufgenommen, das Brett automatisch rot eingerahmt und die Figuren erkannt.
+2. **Snapshot und erkennen** – „Snapshot + erkennen“ wiederholt die Aufnahme jederzeit; der Status nennt geprüfte und unsichere Felder.
+3. **Analysieren** – startet bei Bedarf zuerst die Engine und analysiert die geprüfte Stellung; Ergebnis erscheint im Panel und als Pfeile im Overlay.
+
+Bedienung des Popups:
+
+- Am Fenster ziehen verschiebt es; Position und Sichtbarkeit werden gespeichert.
+- **✕** oder **Ausblenden** blendet es aus; zurück über *Start → Popup einblenden*, `Strg+Umschalt+H` oder *Ansicht → Einrichtungs-Popup anzeigen*.
+- **Einstellungen** öffnet das Hauptfenster im Einstellungs-Tab, **Overlay testen** zeigt Rahmen und Demo-Pfeil ohne Engine.
+- Das Hauptfenster dient weiter zum Korrigieren von Feldern, für FEN/PGN und alle Detail-Einstellungen; es muss nicht im Vordergrund stehen.
+
+Damit die trainierte Seite (z. B. Google im Browser) sichtbar bleibt, bringen Popup und Overlay sich alle zwei Sekunden selbst wieder nach vorn (`WS_EX_TOPMOST`, ohne Fokus zu stehlen). Falls eine Anwendung im echten Vollbild (`F11`) arbeitet, hilft der Fenstermodus.
 
 ## Bildschirmaufnahme und Kalibrierung
 
@@ -199,15 +219,22 @@ Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. 
 
 Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
 
-## Versionen (v1, v2, …)
+## Versionen (v1, v2, v4, …)
 
 Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
 
-- im Fenstertitel (`Stockfish Vision Chess AI v2 – Trainingsmodus`),
+- im Fenstertitel (`Stockfish Vision Chess AI v4 – Trainingsmodus`),
+- im Titel des Einrichtungs-Popups,
 - groß im Start-Tab,
 - unter **Hilfe → Version / Info** samt Änderungsliste.
 
-Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v3"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
+Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v5"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
+
+- `v1` – Grundfassung
+- `v2` – Start-Tab, Größen/Schrift, roter Rahmen, Overlay-DPI
+- `v4` – Popup-Einrichtung, Maus-Ausschnitt, Vordergrund-Wächter (**v3 übersprungen**)
+
+> Hinweis zu den Formulierungen: Das Popup ersetzt nicht die Kalibrierung, sondern führt zu ihr hin – der Ausschnitt wird per Maus gesetzt, danach rastet die automatische Brettecken-Erkennung ein.
 
 ## PGN-Nachbereitung und Export
 
@@ -258,9 +285,9 @@ Dabei entsteht neben der XML eine JSON-Metadatendatei mit Klassen, HOG-Parameter
 .venv\Scripts\python.exe -m ruff check src tests scripts
 ```
 
-Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, automatische Brettecken-Erkennung, DPI-Umrechnung des Overlays, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
+Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, automatische Brettecken-Erkennung, DPI-Umrechnung des Overlays, Maus-Ausschnitt inklusive DPI-Umrechnung, Popup-Zustände und Vordergrund-Wächter, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
 
-`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten, den Hauptfenster-Lebenszyklus, die automatische Einrahmung, den Overlay-Test sowie Fenster- und Schriftgröße. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
+`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten, den Hauptfenster-Lebenszyklus, die automatische Einrahmung, den Overlay-Test, Fenster- und Schriftgröße sowie den kompletten Popup-Ablauf vom Maus-Ausschnitt bis zur Analyse. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
 
 Für den optionalen echten Stockfish-Integrationstest setzen Sie `STOCKFISH_PATH` auf die offizielle Binary und führen denselben Testbefehl aus. Dann wird zusätzlich `tests/test_stockfish_integration.py` ausgeführt; ohne diese Umgebungsvariable wird nur dieser optionale Test übersprungen. Der automatische Standardtest benötigt keinen Stockfish-Download.
 
@@ -294,6 +321,9 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Overlay zeigt nichts:** **Overlay testen** wählen. Erscheint nur das Panel, fehlt die Kalibrierung (Rahmen) bzw. eine Analyse (Pfeile).
 - **Automatischer Rahmen trifft nicht:** Brett vollständig im Aufnahmebereich zeigen, Rahmenkontrast erhöhen oder Ecken per Klick/Rechteck setzen.
 - **Schrift zu klein/groß:** *4 · Einstellungen → Schriftgröße* oder `Strg ++` / `Strg +-`.
+- **Popup verschwunden:** `Strg+Umschalt+H` oder *Start → Popup einblenden*.
+- **Ausschnitt sitzt falsch:** erneut „Bereich mit der Maus wählen“; der Rahmen wird bei jeder Auswahl neu gesetzt.
+- **Browser verdrängt Popup:** Fenstermodus statt `F11`-Vollbild verwenden; der Wächter holt das Popup alle zwei Sekunden zurück.
 
 ## Projektstruktur
 
@@ -307,7 +337,7 @@ src/stockfish_vision/
   board/detect.py automatische Brettecken-Erkennung
   gui/           PySide6-Fenster, Theme/Schriftgröße, Hintergrund-Worker
   version.py     Versionsschema v1, v2, …
-  overlay/       Pfeilebene, roter Rahmen, Koordinaten-/DPI-Umrechnung, Hotkey
+  overlay/       Pfeilebene, roter Rahmen, Popup, Maus-Auswahl, Vordergrund-Wächter, Hotkey
   assets/models/ mitgeliefertes OpenCV-Modell
   config.py      validierte JSON-Einstellungen
   policy.py      Trainings-/Snapshot-/PGN-Freigaben
