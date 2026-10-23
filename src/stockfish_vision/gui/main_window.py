@@ -241,6 +241,10 @@ class MainWindow(QMainWindow):
         self.snapshot_recognized = False
         self.mode = "training"
         self.live_preview = False
+        self.live_tracking = False
+        self.track_warped: np.ndarray | None = None
+        self.track_updates = 0
+        self.recognition_purpose = "snapshot"
         self.last_warped: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
         self.display_frame: np.ndarray | None = None
@@ -249,6 +253,7 @@ class MainWindow(QMainWindow):
         self.capture_origin = (0.0, 0.0)
         self.corners: list[list[float]] = deepcopy(config.capture.corners or [])
         self.detections: list[Detection] = []
+        self.corrections: list = []
         self.last_result = None
         self.capture_in_flight = False
         self.recognition_in_flight = False
@@ -283,6 +288,7 @@ class MainWindow(QMainWindow):
         self.helper = HelperPopup(version_label(), None)
         self.helper.select_region_requested.connect(self._select_region_with_mouse)
         self.helper.snapshot_requested.connect(self._helper_snapshot)
+        self.helper.tracking_toggled.connect(self._toggle_tracking)
         self.helper.analyze_requested.connect(self._helper_analyze)
         self.helper.settings_requested.connect(self._helper_open_settings)
         self.helper.overlay_test_requested.connect(self._test_overlay)
@@ -343,6 +349,10 @@ class MainWindow(QMainWindow):
         self.preview_timer = QTimer(self)
         self.preview_timer.setInterval(700)
         self.preview_timer.timeout.connect(self._tick_preview)
+
+        self.track_timer = QTimer(self)
+        self.track_timer.setInterval(max(250, int(config.capture.tracking_interval_ms)))
+        self.track_timer.timeout.connect(self._tick_tracking)
 
         self._build_ui()
         self._refresh_monitors()
@@ -519,6 +529,11 @@ class MainWindow(QMainWindow):
         popup_button.clicked.connect(self._show_helper)
         pick_button = QPushButton("Ausschnitt mit der Maus wählen")
         pick_button.clicked.connect(self._select_region_with_mouse)
+        self.start_track_button = QPushButton("Live-Tracking starten")
+        self.start_track_button.setToolTip(
+            "Erkennt Stellungsänderungen im Brettrahmen automatisch – ohne Engine-Aufruf."
+        )
+        self.start_track_button.clicked.connect(self._toggle_tracking)
         overlay_test = QPushButton("Overlay testen")
         overlay_test.setToolTip("Zeigt Rahmen, Demo-Pfeil und Panel ohne Engine-Analyse.")
         overlay_test.clicked.connect(self._test_overlay)
@@ -528,6 +543,7 @@ class MainWindow(QMainWindow):
         settings_button.clicked.connect(lambda: self.tabs.setCurrentWidget(self.engine_tab))
         quick_layout.addWidget(popup_button)
         quick_layout.addWidget(pick_button)
+        quick_layout.addWidget(self.start_track_button)
         quick_layout.addWidget(overlay_test)
         quick_layout.addWidget(overlay_toggle)
         quick_layout.addWidget(settings_button)
@@ -565,6 +581,7 @@ class MainWindow(QMainWindow):
                     f"Overlay {overlay_state}",
                     f"Roter Rahmen {frame} (auto {auto_frame})",
                     f"Popup {'sichtbar' if self.helper.isVisible() else 'ausgeblendet'}",
+                    f"Tracking {'aktiv' if self.live_tracking else 'aus'}",
                 )
             )
         )
@@ -675,6 +692,13 @@ class MainWindow(QMainWindow):
 
         actions = QGroupBox("3 · Aufnahme und Analyse")
         actions_layout = QVBoxLayout(actions)
+        self.btn_track = QPushButton("Live-Tracking starten")
+        self.btn_track.setToolTip(
+            "Erkennt die Stellung im gewählten Brettrahmen laufend neu und zieht Rahmen, "
+            "Feldfarben und Historie mit. Die Engine bleibt dabei aus – analysiert wird "
+            "nur ein eingefrorener Snapshot auf Klick."
+        )
+        self.btn_track.clicked.connect(self._toggle_tracking)
         self.btn_preview = QPushButton("Vorschau starten")
         self.btn_preview.clicked.connect(self._toggle_preview)
         self.btn_snapshot = QPushButton("Snapshot aufnehmen und einfrieren")
@@ -699,6 +723,7 @@ class MainWindow(QMainWindow):
             "Keine Aufnahme. Vorschau und Erkennung starten keine Engine automatisch."
         )
         self.capture_status.setWordWrap(True)
+        actions_layout.addWidget(self.btn_track)
         actions_layout.addWidget(self.btn_preview)
         actions_layout.addWidget(self.btn_snapshot)
         actions_layout.addWidget(self.training_notice)
@@ -862,6 +887,17 @@ class MainWindow(QMainWindow):
         self.confidence_spin.setRange(0.05, 0.99)
         self.confidence_spin.setDecimals(2)
         self.confidence_spin.setSingleStep(0.05)
+        self.track_interval_spin = QSpinBox()
+        self.track_interval_spin.setRange(250, 5000)
+        self.track_interval_spin.setSingleStep(250)
+        self.track_interval_spin.setSuffix(" ms")
+        self.track_interval_spin.setToolTip(
+            "Abstand zwischen zwei Bildschirmaufnahmen im Live-Tracking. "
+            "Kleinere Werte reagieren schneller, größere schonen die CPU."
+        )
+        self.track_interval_spin.valueChanged.connect(
+            lambda value: self.track_timer.setInterval(int(value))
+        )
         apply_recognition = QPushButton("Erkennungseinstellungen anwenden")
         apply_recognition.clicked.connect(self._apply_recognition_settings)
         for spin in (self.occupancy_spin, self.confidence_spin):
@@ -869,6 +905,7 @@ class MainWindow(QMainWindow):
         recognition_form.addRow("Figurenmodell (XML)", self._with_button(self.model_path_edit, model_browse))
         recognition_form.addRow("Belegungsschwelle (Std.-Abw.)", self.occupancy_spin)
         recognition_form.addRow("Warnschwelle Konfidenz", self.confidence_spin)
+        recognition_form.addRow("Live-Tracking-Intervall", self.track_interval_spin)
         recognition_form.addRow(apply_recognition)
 
         overlay_group = QGroupBox("Overlay und Brettrahmen")
@@ -1106,6 +1143,9 @@ class MainWindow(QMainWindow):
         self.model_path_edit.setText(self.config.model_path)
         self.occupancy_spin.setValue(self.config.occupancy_std_threshold)
         self.confidence_spin.setValue(self.config.min_piece_confidence)
+        self.track_interval_spin.blockSignals(True)
+        self.track_interval_spin.setValue(self.config.capture.tracking_interval_ms)
+        self.track_interval_spin.blockSignals(False)
 
         self.frame_check.blockSignals(True)
         self.frame_width_spin.blockSignals(True)
@@ -1174,6 +1214,7 @@ class MainWindow(QMainWindow):
         self.config.capture.orientation = self.orientation_combo.currentText()
         self.config.capture.warp_size = self.warp_size_spin.value()
         self.config.capture.auto_frame = self.auto_frame_check.isChecked()
+        self.config.capture.tracking_interval_ms = self.track_interval_spin.value()
         self.config.ui.window_width = self.window_width_spin.value()
         self.config.ui.window_height = self.window_height_spin.value()
         self.config.ui.font_scale_percent = self.font_scale_slider.value()
@@ -1350,7 +1391,86 @@ class MainWindow(QMainWindow):
         if self.live_preview and not self.capture_in_flight:
             self._request_capture("preview")
 
+    # ------------------------------------------------------------ Live-Tracking
+    def _toggle_tracking(self) -> None:
+        if self.live_tracking:
+            self._stop_tracking("Live-Tracking gestoppt. Die letzte erkannte Stellung bleibt stehen.")
+        else:
+            self._start_tracking()
+
+    def _start_tracking(self) -> None:
+        if self.live_preview:
+            self._toggle_preview()
+        self.live_tracking = True
+        self.track_warped = None
+        self.track_updates = 0
+        self.btn_track.setText("Live-Tracking stoppen")
+        self.start_track_button.setText("Live-Tracking stoppen")
+        self.helper.set_tracking(True)
+        self.track_timer.start()
+        if len(self.corners) != 4:
+            self.capture_status.setText(
+                "Live-Tracking läuft, aber das Brett ist noch nicht eingerahmt: erst "
+                "Ausschnitt mit der Maus wählen, dann erkennt das Tracking automatisch."
+            )
+        else:
+            self.capture_status.setText("Live-Tracking aktiv. Warte auf die erste Stellungsänderung …")
+        self._update_action_states()
+        self._tick_tracking()
+
+    def _stop_tracking(self, message: str | None = None) -> None:
+        if not self.live_tracking:
+            return
+        self.live_tracking = False
+        self.track_timer.stop()
+        self.track_warped = None
+        if hasattr(self, "btn_track"):
+            self.btn_track.setText("Live-Tracking starten")
+        if hasattr(self, "start_track_button"):
+            self.start_track_button.setText("Live-Tracking starten")
+        self.helper.set_tracking(False)
+        if message:
+            self.capture_status.setText(message)
+        self._update_action_states()
+
+    def _tick_tracking(self) -> None:
+        if not self.live_tracking or self.capture_in_flight or self.recognition_in_flight:
+            return
+        self._request_capture("track")
+
+    def _handle_track_frame(self, frame: np.ndarray) -> None:
+        if len(self.corners) != 4:
+            self.capture_status.setText(
+                "Live-Tracking aktiv: Brett nicht eingerahmt. Vier Ecken setzen oder den "
+                "Ausschnitt mit der Maus wählen."
+            )
+            return
+        try:
+            warped, _ = warp_board(frame, self.corners, self.config.capture.warp_size)
+        except (ValueError, cv2.error) as exc:
+            self.capture_status.setText(f"Tracking: Kalibrierung prüfen ({exc}).")
+            return
+        if self.track_warped is None:
+            self.track_warped = warped
+            self.capture_status.setText(
+                "Live-Tracking aktiv. Warte auf die erste Stellungsänderung …"
+            )
+            return
+        delta = board_mean_abs_diff(self.track_warped, warped)
+        if delta < float(self.config.capture.change_threshold):
+            self.capture_status.setText(
+                f"Live-Tracking aktiv. Keine Änderung ({delta:.1f} unter "
+                f"{self.config.capture.change_threshold:.1f})."
+            )
+            return
+        # Erst bei sichtbarer Änderung erkennen; der Vergleich läuft gegen die
+        # zuletzt erkannte Stellung, damit langsame Änderungen nicht verloren gehen.
+        self.track_warped = warped
+        self._request_recognition("track", warped)
+
     def _take_snapshot(self) -> None:
+        if self.live_tracking:
+            self._stop_tracking()
         if self.live_preview:
             self._toggle_preview()
         self._request_capture("snapshot")
@@ -1394,6 +1514,8 @@ class MainWindow(QMainWindow):
                         "Snapshot eingefroren. Brett nicht sicher gefunden: vier Ecken klicken "
                         "oder ein Rechteck aufziehen."
                     )
+        elif purpose == "track":
+            self._handle_track_frame(frame)
         elif self.live_preview and len(self.corners) == 4:
             try:
                 warped, _ = warp_board(frame, self.corners, self.config.capture.warp_size)
@@ -1427,6 +1549,8 @@ class MainWindow(QMainWindow):
         self._chain_recognize = False
         if purpose == "preview" and self.live_preview:
             self._toggle_preview()
+        if purpose == "track" and self.live_tracking:
+            self._stop_tracking()
         self.capture_status.setText(f"Aufnahmefehler: {message}")
         self.helper.set_step(0, f"Aufnahmefehler: {message.splitlines()[0]}")
         self._update_action_states()
@@ -1521,6 +1645,7 @@ class MainWindow(QMainWindow):
         self._update_action_states()
 
     def _reset_corners(self) -> None:
+        self._stop_tracking()
         self.corners = []
         self.preview_warped = None
         self.snapshot_recognized = False
@@ -1551,21 +1676,33 @@ class MainWindow(QMainWindow):
         except (ValueError, cv2.error) as exc:
             QMessageBox.warning(self, "Kalibrierung", str(exc))
             return
+        self.capture_status.setText("64 Felder werden im Hintergrund klassifiziert …")
+        self._request_recognition("snapshot", self.pending_warped)
+
+    def _request_recognition(self, purpose: str, warped: np.ndarray) -> None:
+        if self.recognition_in_flight:
+            return
+        self.recognition_purpose = purpose
+        self.pending_warped = warped
         self.recognition_in_flight = True
         self.snapshot_recognized = False
-        self.capture_status.setText("64 Felder werden im Hintergrund klassifiziert …")
         self._update_action_states()
         turn = chess.WHITE if self.turn_combo.currentIndex() == 0 else chess.BLACK
         self.recognition_worker.request_recognize.emit(
-            self.pending_warped.copy(), self.orientation_combo.currentText(), turn
+            warped.copy(), self.orientation_combo.currentText(), turn
         )
 
     def _on_recognition(self, result: RecognitionResult) -> None:
+        purpose = self.recognition_purpose
+        self.recognition_purpose = "snapshot"
         self.recognition_in_flight = False
         self.last_warped = self.pending_warped
         self.pending_warped = None
         self.detections = result.detections
         self.snapshot_recognized = True
+        if purpose == "track":
+            self._apply_tracking_result(result)
+            return
         self._set_mode("frozen_snapshot")
         self._set_board(result.board, clear_detections=False)
         self.board_widget.set_detections(self.detections)
@@ -1583,6 +1720,7 @@ class MainWindow(QMainWindow):
         if result.model_error:
             messages.append("Modell: " + result.model_error)
         self._set_validity_messages(ok and not low, messages)
+        self._show_corrections(result)
         self.guard.record(result.board.board_fen())
         self.capture_status.setText(
             "Erkennung abgeschlossen. Konfidenzen prüfen; keine Auto-Analyse."
@@ -1596,6 +1734,43 @@ class MainWindow(QMainWindow):
             f"Erkennung fertig ({summary}). Jetzt analysieren oder in der App korrigieren.",
             can_analyze=True,
         )
+        self._update_action_states()
+
+    def _show_corrections(self, result: RecognitionResult) -> None:
+        """Zeigt automatische Plausibilitätskorrekturen im Prüf-Tab an."""
+        corrections = getattr(result, "corrections", [])
+        self.corrections = list(corrections)
+        if not corrections:
+            return
+        lines = "\n".join(item.description for item in corrections)
+        if hasattr(self, "detection_details"):
+            self.detection_details.setText(
+                "Automatisch korrigiert, damit die Stellung gültig ist:\n" + lines
+            )
+        self.statusBar().showMessage(
+            f"{len(corrections)} Felder automatisch korrigiert (Plausibilität)."
+        )
+
+    def _apply_tracking_result(self, result: RecognitionResult) -> None:
+        """Übernimmt eine Stellung aus dem Live-Tracking (ohne Engine-Aufruf)."""
+        self.track_updates += 1
+        self._set_mode("live_tracking")
+        self._set_board(result.board, clear_detections=False)
+        self.board_widget.set_detections(self.detections)
+        self._populate_detection_table()
+        self._show_corrections(result)
+        ok, issues = result.validity
+        self._set_validity_messages(ok, list(issues))
+        self.guard.record(result.board.board_fen())
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self.history_view.append(
+            f"[{stamp}] Live-Tracking #{self.track_updates}: {result.board.fen()}\n"
+        )
+        self.capture_status.setText(
+            f"Live-Tracking: Stellung aktualisiert (#{self.track_updates}). "
+            "Engine bleibt aus – für eine Analyse den Snapshot einfrieren."
+        )
+        self._update_overlay_frame()
         self._update_action_states()
 
     def _on_recognition_error(self, message: str) -> None:
@@ -1629,6 +1804,7 @@ class MainWindow(QMainWindow):
 
     def _clear_detection_state(self) -> None:
         self.detections = []
+        self.corrections = []
         if hasattr(self, "detection_table"):
             self.detection_table.setRowCount(0)
             self.detection_details.setText("Noch keine Bilderkennung.")
@@ -1754,9 +1930,9 @@ class MainWindow(QMainWindow):
     def _populate_detection_table(self) -> None:
         self.detection_table.setRowCount(len(self.detections))
         for row, detection in enumerate(self.detections):
-            confidence_color = QColor(230, 235, 240)
+            confidence_color = QColor(17, 18, 20)
             if detection.occupied and detection.confidence < self.config.min_piece_confidence:
-                confidence_color = QColor(239, 100, 90)
+                confidence_color = QColor(179, 38, 30)
             foreground = QBrush(confidence_color)
             values = [
                 chess.square_name(detection.square),
@@ -2394,6 +2570,7 @@ class MainWindow(QMainWindow):
             "training": "Eigene Trainingsstellung",
             "pgn_completed": "PGN-Nachbereitung abgeschlossener Partien",
             "frozen_snapshot": "Manuell eingefrorener Snapshot",
+            "live_tracking": "Live-Tracking der Bildschirmstellung (ohne Engine)",
         }
         self.mode_banner.setText(
             f"TRAININGS- / ANALYSEMODUS · {labels.get(self.mode, 'Gesperrt')} · "
@@ -2420,8 +2597,10 @@ class MainWindow(QMainWindow):
             self,
             "Trainingsmodus",
             "Das Programm analysiert ausschließlich manuell ausgelöste Trainingsstellungen, "
-            "bestätigte eingefrorene Snapshots und abgeschlossene PGN-Partien. Es gibt keine "
-            "automatische Live-Erkennung mit Engine-Ausgabe und keine Anti-Cheat-Umgehung.",
+            "bestätigte eingefrorene Snapshots und abgeschlossene PGN-Partien. Das "
+            "Live-Tracking erkennt die Stellung zwar laufend, ruft aber niemals selbst die "
+            "Engine auf: Analysiert wird nur ein eingefrorener Snapshot auf Klick. Es gibt "
+            "keine Anti-Cheat-Umgehung.",
         )
 
     def showEvent(self, event) -> None:  # type: ignore[override]
@@ -2458,6 +2637,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         self.preview_timer.stop()
+        self.track_timer.stop()
         if not self.isMaximized() and self.isVisible():
             for widget in (self.window_width_spin, self.window_height_spin):
                 widget.blockSignals(True)

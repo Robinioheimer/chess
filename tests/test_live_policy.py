@@ -16,6 +16,13 @@ def test_training_and_pgn_allowed() -> None:
     assert ok
 
 
+def test_live_tracking_mode_blocks_engine() -> None:
+    """Live-Tracking erkennt nur; die Engine bleibt auf Klick-Snapshots beschränkt."""
+    ok, message = can_analyze("live_tracking", snapshot_confirmed=True)
+    assert not ok
+    assert message == LIVE_GAME_BLOCK_MESSAGE
+
+
 def test_live_mode_blocked() -> None:
     ok, message = can_analyze("live_online")
     assert not ok

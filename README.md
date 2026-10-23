@@ -1,18 +1,18 @@
-# Stockfish Vision Chess AI – **v6**
+# Stockfish Vision Chess AI – **v7**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
 
-Neu in **v6**: Die Oberfläche ist jetzt **hell** – weißer Hintergrund, schwarzer Text, graue Akzente (Grün nur noch als Bedeutung „erledigt“, Rot/Orange nur für Warnungen). Die Ausschnitt-Auswahl legt für **jeden Monitor eine eigene Ebene** über den kompletten Bildschirm, sodass wirklich der ganze Desktop bedeckt ist. Die Zustimmung zum Trainingsmodus wird **automatisch** erteilt und nicht mehr per Checkbox abgefragt. Details unter [Versionen](#versionen-v1-v2-v4-v5-v6-…).
+Neu in **v7**: **Live-Tracking** – das Programm verfolgt den eingerahmten Brettbereich selbstständig: es nimmt in einem einstellbaren Intervall ein Bild auf, erkennt die Stellung neu, sobald sich sichtbar etwas geändert hat, und zieht Brett, Overlay und Historie mit. Die Engine bleibt dabei aus; analysiert wird weiterhin nur ein bewusst eingefrorener Snapshot. Außerdem eine **Plausibilitätskorrektur**: unmögliche Erkennungen wie zwei Könige einer Farbe, neun Bauern oder ein Bauer auf der Grundreihe werden automatisch auf die zweitbeste Klasse abgebildet – die Meldung „zu viele Könige“ blockiert die Analyse nicht mehr, und jede Korrektur wird im Prüf-Tab angezeigt.
+
+Neu in **v6**: Die Oberfläche ist jetzt **hell** – weißer Hintergrund, schwarzer Text, graue Akzente (Grün nur noch als Bedeutung „erledigt“, Rot/Orange nur für Warnungen). Die Ausschnitt-Auswahl legt für **jeden Monitor eine eigene Ebene** über den kompletten Bildschirm, sodass wirklich der ganze Desktop bedeckt ist. Die Zustimmung zum Trainingsmodus wird **automatisch** erteilt und nicht mehr per Checkbox abgefragt. Details unter [Versionen](#versionen-v1-v2-v4-v5-v6-v7-…).
 
 Neu in **v5**: Die Ausschnitt-Auswahl deckt jetzt immer den **kompletten Desktop** ab (auch mehrere Monitore, negative Koordinaten und hohe Windows-Skalierung) – vorher konnte das Auswahlfenster kleiner als der Bildschirm sein. Das Helfer-Popup ist breiter, lässt sich **am rechten Rand ziehen** und merkt sich seine Breite.
 
 Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.)
 
-Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.) Details unter [Versionen](#versionen-v1-v2-v4-…).
-
 Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Engine-Varianten. Ein transparentes Overlay stellt bei kalibrierten Snapshots farbige Pfeile und Feldmarkierungen dar. Das unabhängige Analyse-Panel ist verschieb- und skalierbar.
 
-> **Fairness / Nutzungsrahmen:** Es gibt keine automatische Live-Engine-Analyse und keine Anti-Cheat-Umgehung. Engine-Ausgaben werden nur manuell für Trainingsstellungen, ausdrücklich bestätigte eingefrorene Snapshots oder abgeschlossene PGN-Partien angefordert. Nutzen Sie das Programm nicht während laufender gewerteter Online-Partien.
+> **Fairness / Nutzungsrahmen:** Es gibt keine automatische Live-Engine-Analyse und keine Anti-Cheat-Umgehung. Engine-Ausgaben werden nur manuell für Trainingsstellungen, ausdrücklich bestätigte eingefrorene Snapshots oder abgeschlossene PGN-Partien angefordert. Das Live-Tracking beobachtet zwar das Brett, ruft die Engine aber nie selbst auf – für eine Bewertung muss der Snapshot bewusst eingefroren und analysiert werden. Nutzen Sie das Programm nicht während laufender gewerteter Online-Partien.
 
 ## Funktionsumfang
 
@@ -34,6 +34,8 @@ Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Eng
 - einstellbare Fenstergröße (Voreinstellungen, freie Pixelwerte, maximierter Start) und Schriftgröße
 - geführter Start-Tab mit Statusübersicht und Overlay-Test
 - **Einrichtungs-Popup** (immer im Vordergrund) mit drei Schritten: Ausschnitt, Snapshot + Erkennen, Analysieren
+- **Live-Tracking**: erkennt Stellungsänderungen im Brettrahmen automatisch neu (Intervall einstellbar), Engine bleibt aus
+- **Plausibilitätskorrektur** der Erkennung: höchstens ein König je Seite, höchstens acht Bauern, keine Bauern auf der Grundreihe
 - **Bildschirmausschnitt per Maus** aufziehen: Abdunkelung, Auswahlrahmen mit Größenanzeige, `Esc` bricht ab
 - Vordergrund-Wächter, der Popup und Overlay regelmäßig wieder nach vorn holt
 - atomare JSON-Konfiguration, Sicherung defekter Konfigurationen und Protokolldateien
@@ -134,6 +136,7 @@ Damit die trainierte Seite (z. B. Google im Browser) sichtbar bleibt, bringen Po
    - `white_top`: Weiß oben / Schwarzperspektive;
    - `white_left` / `white_right`: Weiß an der entsprechenden Seite.
 7. Der Trainingsrahmen ist automatisch bestätigt (siehe Hinweis *Trainingsmodus aktiv*); wählen Sie **Snapshot im Hintergrund erkennen**.
+   Alternativ **Live-Tracking starten** (im Popup oder unter *1 · Aufnahme*): Das Programm erkennt die Stellung dann selbstständig neu, sobald sich das Brett sichtbar ändert, und schreibt jeden Schritt in die Historie. Für eine Engine-Bewertung den Snapshot einfrieren – Tracking stoppt dabei automatisch.
 8. Prüfen Sie unter **2 · Prüfen** Stellung und Scores. Erst danach **Geprüften Snapshot analysieren** wählen.
 
 Die Kalibrierung bezieht sich auf den ausgewählten Snapshot. Bei geändertem Ausschnitt, verschobenem Brett oder anderer Skalierung muss sie erneut geprüft werden.
@@ -226,22 +229,23 @@ Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. 
 
 Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
 
-## Versionen (v1, v2, v4, v5, v6, …)
+## Versionen (v1, v2, v4, v5, v6, v7, …)
 
 Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
 
-- im Fenstertitel (`Stockfish Vision Chess AI v6 – Trainingsmodus`),
+- im Fenstertitel (`Stockfish Vision Chess AI v7 – Trainingsmodus`),
 - im Titel des Einrichtungs-Popups,
 - groß im Start-Tab,
 - unter **Hilfe → Version / Info** samt Änderungsliste.
 
-Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v6"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
+Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v7"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
 
 - `v1` – Grundfassung
 - `v2` – Start-Tab, Größen/Schrift, roter Rahmen, Overlay-DPI
 - `v4` – Popup-Einrichtung, Maus-Ausschnitt, Vordergrund-Wächter (**v3 übersprungen**)
 - `v5` – Größenkorrektur: Auswahl über den ganzen Desktop, Popup breiter und frei skalierbar
 - `v6` – helles Design (Weiß/Grau/Schwarz), Auswahl-Ebene je Monitor über den ganzen Bildschirm, automatische Trainings-Zustimmung
+- `v7` – Live-Tracking der Bildschirmstellung ohne Engine-Automatik, Plausibilitätskorrektur gegen „zu viele Könige“ und ähnliche Fehlererkennungen
 
 > Hinweis zu den Formulierungen: Das Popup ersetzt nicht die Kalibrierung, sondern führt zu ihr hin – der Ausschnitt wird per Maus gesetzt, danach rastet die automatische Brettecken-Erkennung ein.
 
@@ -335,6 +339,9 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Auswahl-Ebene erreicht den Bildschirmrand nicht:** in v5 behoben. Sie bedeckt jetzt alle Monitore samt Rand. Das Log (`%APPDATA%\StockfishVisionChessAI\logs\`) protokolliert die tatsächliche Auswahlgröße.
 - **Popup zu schmal/breit:** rechten Fensterrand ziehen oder *4 · Einstellungen → Popup-Breite* setzen.
 - **Auswahl bedeckt nur einen Teil / einen Monitor:** in v6 behoben. Das Programm legt je Monitor eine eigene Auswahl-Ebene an; das Log nennt Anzahl und Rechtecke der Ebenen. Bleibt eine Stelle unbedeckt, Skalierung prüfen und erneut starten.
+- **„Zu viele Könige auf dem Brett“ / ungültige Figurenzahl:** in v7 behoben. Die Erkennung korrigiert höchstens einen König je Seite (Stammfeld e1/e8 bzw. Grundreihe gewinnt), kappt Bauern auf acht und ersetzt Bauern auf der Grundreihe. Jede Änderung steht als „Plausibilität korrigiert: feld: alt → neu“ im Prüf-Tab; bleibt die Stellung danach ungültig, das betroffene Feld per Klick korrigieren.
+- **Live-Tracking reagiert nicht:** Es braucht einen eingerahmten Brettbereich (vier Ecken) und eine sichtbare Änderung am Brett. Ist der Rahmen gesetzt und passiert nichts, das Intervall unter *4 · Einstellungen → Live-Tracking-Intervall* kleiner stellen; bei Dauerregen von Fehlalarmen größer. Bei starker Bewegung im Bild (Videos, Animationen) die Belegungsschwelle erhöhen.
+- **Live-Tracking erkennt, aber die Engine bleibt still:** Das ist beabsichtigt. Das Tracking ruft die Engine nie selbst auf; für eine Bewertung **Snapshot aufnehmen und einfrieren** und diesen analysieren.
 - **Zustimmung zum Trainingsmodus:** wird automatisch erteilt und mit Zeitstempel in `config.json` (`training_acknowledged`, `training_acknowledged_at`) festgehalten – es gibt keine Checkbox mehr.
 - **Browser verdrängt Popup:** Fenstermodus statt `F11`-Vollbild verwenden; der Wächter holt das Popup alle zwei Sekunden zurück.
 

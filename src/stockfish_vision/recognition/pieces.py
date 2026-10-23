@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import chess
@@ -16,6 +16,7 @@ from stockfish_vision.recognition.hog_svm import (
     hog_features,
     load_svm,
 )
+from stockfish_vision.recognition.plausibility import Correction, repair_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ class PieceClassifier:
         self.occupancy_threshold = float(occupancy_threshold)
         self.min_confidence = float(min_confidence)
         self.templates = TemplateBank()
+        self.last_corrections: list[Correction] = []
         self._svm = None
         self._scorer: SvmDecisionScorer | None = None
         self.model_error: str | None = None
@@ -201,9 +203,31 @@ class PieceClassifier:
                         alternatives=scores,
                     )
                 )
+        symbols = {
+            square: (piece.symbol() if piece is not None else None)
+            for square, piece in pieces.items()
+        }
+        scores = {detection.square: detection.alternatives for detection in detections}
+        symbols, corrections = repair_symbols(symbols, scores)
+        self.last_corrections = corrections
+        if corrections:
+            for index, detection in enumerate(detections):
+                symbol = symbols.get(detection.square)
+                piece = chess.Piece.from_symbol(symbol) if symbol else None
+                if piece != detection.piece:
+                    detections[index] = replace(detection, piece=piece)
+        pieces = {
+            square: (chess.Piece.from_symbol(symbol) if symbol else None)
+            for square, symbol in symbols.items()
+        }
         board = board_from_piece_map(pieces, turn=turn)
         ok, issues = describe_validity(board)
         unresolved = [d.square for d in detections if d.occupied and d.piece is None]
+        if corrections:
+            issues.append(
+                "Plausibilität korrigiert: "
+                + "; ".join(item.description for item in corrections)
+            )
         if unresolved:
             ok = False
             names = ", ".join(chess.square_name(square) for square in unresolved)

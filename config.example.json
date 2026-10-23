@@ -28,6 +28,7 @@
     "orientation": "white_bottom",
     "warp_size": 640,
     "change_threshold": 8.0,
+    "tracking_interval_ms": 1000,
     "auto_frame": true
   },
   "ui": {

@@ -220,14 +220,14 @@ def test_main_window_mouse_region_flow_with_helper_popup(app, monkeypatch) -> No
         app.processEvents()
 
 
-def test_version_is_v6() -> None:
+def test_version_is_v7() -> None:
     from stockfish_vision.version import APP_VERSION, VERSION_HISTORY, full_version_label
 
-    assert APP_VERSION == "v6"
-    assert "v6" in full_version_label()
+    assert APP_VERSION == "v7"
+    assert "v7" in full_version_label()
     labels = [label for label, _text in VERSION_HISTORY]
-    assert labels[-1] == "v6"
-    assert labels == ["v1", "v2", "v4", "v5", "v6"]
+    assert labels[-1] == "v7"
+    assert labels == ["v1", "v2", "v4", "v5", "v6", "v7"]
 
 
 def test_popup_width_is_configurable_and_persisted(app, monkeypatch) -> None:
@@ -324,3 +324,131 @@ def test_overlay_surfaces_are_light(app) -> None:
         assert module.TEXT.red() < 60 and module.TEXT.green() < 60
     # Analyse-Panel zeichnet einen hellen Kasten mit dunkler Schrift.
     assert window.PANEL_BG.red() > 235 and window.TEXT.red() < 60
+
+
+def _tracking_window(app, monkeypatch):
+    from stockfish_vision.capture.screen import MonitorInfo
+    from stockfish_vision.gui import main_window as module
+
+    monkeypatch.setattr(
+        module, "list_monitors", lambda: [MonitorInfo(1, 0, 0, 1200, 900, "Testmonitor")]
+    )
+    monkeypatch.setattr(module.WindowsHotkeyFilter, "register", lambda self: None)
+    monkeypatch.setattr(module, "save_config", lambda config, path=None: None)
+    config = AppConfig()
+    config.overlay.visible = False
+    config.capture.warp_size = 320
+    config.capture.change_threshold = 1.0
+    return module.MainWindow(config)
+
+
+def test_live_tracking_reacts_only_to_visible_changes(app, monkeypatch) -> None:
+    import numpy as np
+
+    from stockfish_vision.board.geometry import square_to_image_rc
+    from stockfish_vision.recognition.glyphs import render_piece_glyph
+
+    window = _tracking_window(app, monkeypatch)
+    size = 400
+    frame = np.full((size, size, 3), 40, dtype=np.uint8)
+    calls: list[tuple[str, object]] = []
+    try:
+        window.corners = [[0, 0], [size - 1, 0], [size - 1, size - 1], [0, size - 1]]
+        window._request_recognition = lambda purpose, warped: calls.append((purpose, warped))
+
+        window._on_capture(frame.copy(), (0, 0), "track")
+        assert calls == []  # erste Aufnahme setzt nur den Vergleichsstand
+        window._on_capture(frame.copy(), (0, 0), "track")
+        assert calls == []  # unverändertes Bild löst keine Erkennung aus
+
+        col, row = square_to_image_rc(chess.E2, "white_bottom")
+        tile = size // 8
+        glyph = render_piece_glyph("P", size=tile, light_square=True)
+        frame[
+            row * tile : (row + 1) * tile,
+            col * tile : (col + 1) * tile,
+        ] = glyph[:, :, ::-1]
+        window._on_capture(frame.copy(), (0, 0), "track")
+        assert len(calls) == 1
+        assert calls[0][0] == "track"
+        assert "Änderung" in window.capture_status.text() or "Live-Tracking" in window.capture_status.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_live_tracking_toggle_and_status(app, monkeypatch) -> None:
+    window = _tracking_window(app, monkeypatch)
+    try:
+        assert window.live_tracking is False
+        assert window.btn_track.text() == "Live-Tracking starten"
+        window._request_capture = lambda purpose: None
+        window._start_tracking()
+        assert window.live_tracking is True
+        assert window.track_timer.isActive() is True
+        assert window.btn_track.text() == "Live-Tracking stoppen"
+        assert "Tracking aktiv" in window.overview_status.text() or "aktiv" in window.overview_status.text()
+
+        window._stop_tracking("Live-Tracking gestoppt.")
+        assert window.live_tracking is False
+        assert window.track_timer.isActive() is False
+        assert window.btn_track.text() == "Live-Tracking starten"
+        assert "gestoppt" in window.capture_status.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_tracking_result_updates_board_history_and_blocks_engine(app, monkeypatch) -> None:
+    from stockfish_vision.chesslogic.fenutil import describe_validity
+    from stockfish_vision.gui.worker import RecognitionResult
+    from stockfish_vision.policy import can_analyze
+
+    window = _tracking_window(app, monkeypatch)
+    try:
+        board = chess.Board()
+        window.recognition_purpose = "track"
+        window._on_recognition(
+            RecognitionResult(
+                board=board,
+                detections=[],
+                validity=describe_validity(board),
+                model_error=None,
+            )
+        )
+        assert window.mode == "live_tracking"
+        assert window.track_updates == 1
+        assert "Live-Tracking #1" in window.history_view.toPlainText()
+        assert window.recognition_purpose == "snapshot"
+        # Das Live-Tracking darf die Engine nicht selbst aufrufen.
+        allowed, _reason = can_analyze("live_tracking")
+        assert allowed is False
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_automatic_corrections_are_reported(app, monkeypatch) -> None:
+    from stockfish_vision.chesslogic.fenutil import board_from_piece_map, describe_validity
+    from stockfish_vision.gui.worker import RecognitionResult
+    from stockfish_vision.recognition.plausibility import Correction
+
+    window = _tracking_window(app, monkeypatch)
+    try:
+        board = board_from_piece_map(
+            {chess.E1: chess.Piece.from_symbol("K"), chess.D1: chess.Piece.from_symbol("K")}
+        )
+        window._on_recognition(
+            RecognitionResult(
+                board=board,
+                detections=[],
+                validity=describe_validity(board),
+                model_error=None,
+                corrections=[Correction(chess.D1, "K", "Q", "nur ein König je Seite")],
+            )
+        )
+        assert "Automatisch korrigiert" in window.detection_details.text()
+        assert "d1" in window.detection_details.text()
+    finally:
+        window.close()
+        app.processEvents()

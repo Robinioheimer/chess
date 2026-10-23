@@ -243,3 +243,18 @@ def test_region_selection_emits_single_selection(app) -> None:
     assert results[0].width() >= 150 and results[0].height() >= 150
     assert session.active() is False
     session.close()
+
+
+def test_helper_tracking_button_reflects_state(app) -> None:
+    from stockfish_vision.overlay.helper import HelperPopup
+
+    popup = HelperPopup(version="v7.0.0")
+    try:
+        assert popup.track_button.text() == "Live-Tracking starten"
+        popup.set_tracking(True)
+        assert popup.track_button.text() == "Live-Tracking stoppen"
+        assert "background:#111214" in popup.track_button.styleSheet()
+        popup.set_tracking(False)
+        assert popup.track_button.text() == "Live-Tracking starten"
+    finally:
+        popup.close()

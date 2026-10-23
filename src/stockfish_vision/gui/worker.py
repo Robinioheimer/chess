@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import chess
 import numpy as np
@@ -12,6 +12,7 @@ from stockfish_vision.capture.screen import ScreenCapture, list_monitors
 from stockfish_vision.config import EngineSettings
 from stockfish_vision.engine.client import AnalysisResult, EngineClient
 from stockfish_vision.recognition.pieces import Detection, PieceClassifier
+from stockfish_vision.recognition.plausibility import Correction
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class RecognitionResult:
     detections: list[Detection]
     validity: tuple[bool, list[str]]
     model_error: str | None
+    corrections: list[Correction] = field(default_factory=list)
+    purpose: str = "snapshot"
 
 
 class RecognitionWorker(QObject):
@@ -132,6 +135,7 @@ class RecognitionWorker(QObject):
                     detections=detections,
                     validity=validity,
                     model_error=classifier.model_error,
+                    corrections=list(getattr(classifier, "last_corrections", [])),
                 )
             )
         except Exception as exc:
