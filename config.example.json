@@ -15,7 +15,11 @@
     "panel_offset_y": 16,
     "scale_percent": 100,
     "hotkey": "ctrl+shift+f8",
-    "visible": true
+    "visible": true,
+    "show_frame": true,
+    "frame_color": "#ff2d2d",
+    "frame_width": 5,
+    "coordinate_scale_percent": 0
   },
   "capture": {
     "monitor_index": 1,
@@ -23,7 +27,14 @@
     "corners": null,
     "orientation": "white_bottom",
     "warp_size": 640,
-    "change_threshold": 8.0
+    "change_threshold": 8.0,
+    "auto_frame": true
+  },
+  "ui": {
+    "window_width": 1380,
+    "window_height": 900,
+    "font_scale_percent": 100,
+    "start_maximized": false
   },
   "last_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   "side_to_move": "w",

@@ -50,3 +50,53 @@ def test_config_normalises_out_of_range_and_unknown_values() -> None:
     assert config.overlay.scale_percent == 60
     assert config.capture.region is None
     assert config.min_piece_confidence == 0.45
+
+
+def test_config_stores_ui_size_font_and_frame_options(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    config = AppConfig()
+    config.ui.window_width = 1600
+    config.ui.window_height = 1000
+    config.ui.font_scale_percent = 125
+    config.ui.start_maximized = True
+    config.overlay.show_frame = False
+    config.overlay.frame_color = "#00ff00"
+    config.overlay.frame_width = 8
+    config.overlay.coordinate_scale_percent = 150
+    config.capture.auto_frame = False
+    save_config(config, path)
+    loaded = load_config(path)
+    assert loaded.ui.window_width == 1600
+    assert loaded.ui.window_height == 1000
+    assert loaded.ui.font_scale_percent == 125
+    assert loaded.ui.start_maximized is True
+    assert loaded.overlay.show_frame is False
+    assert loaded.overlay.frame_color == "#00ff00"
+    assert loaded.overlay.frame_width == 8
+    assert loaded.overlay.coordinate_scale_percent == 150
+    assert loaded.capture.auto_frame is False
+
+
+def test_config_normalises_new_display_options() -> None:
+    config = AppConfig.from_dict(
+        {
+            "ui": {"window_width": 10, "window_height": 99_999, "font_scale_percent": 500},
+            "overlay": {"frame_color": "rot", "frame_width": 99, "coordinate_scale_percent": 5},
+        }
+    )
+    assert config.ui.window_width == 720
+    assert config.ui.window_height == 4000
+    assert config.ui.font_scale_percent == 200
+    assert config.overlay.frame_color == "#ff2d2d"
+    assert config.overlay.frame_width == 24
+    assert config.overlay.coordinate_scale_percent == 0
+
+
+def test_version_labels_follow_scheme() -> None:
+    from stockfish_vision.version import APP_VERSION, full_version_label, version_label, window_title
+
+    assert APP_VERSION.startswith("v")
+    assert APP_VERSION[1:].isdigit()
+    assert version_label() == APP_VERSION
+    assert version_label() in full_version_label()
+    assert version_label() in window_title()

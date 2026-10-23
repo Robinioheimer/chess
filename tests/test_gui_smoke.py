@@ -55,3 +55,66 @@ def test_main_window_constructs_and_applies_fen(app, monkeypatch, tmp_path) -> N
     finally:
         window.close()
         app.processEvents()
+
+
+def test_main_window_overview_auto_frame_and_sizing(app, monkeypatch) -> None:
+    import cv2
+    import numpy as np
+
+    from stockfish_vision.capture.screen import MonitorInfo
+    from stockfish_vision.config import AppConfig
+    from stockfish_vision.gui import main_window as module
+
+    monkeypatch.setattr(
+        module, "list_monitors", lambda: [MonitorInfo(1, 0, 0, 900, 700, "Testmonitor")]
+    )
+    monkeypatch.setattr(module.WindowsHotkeyFilter, "register", lambda self: None)
+    monkeypatch.setattr(module, "save_config", lambda config, path=None: None)
+
+    size = 320
+    tile = size // 8
+    frame = np.full((600, 800, 3), 30, dtype=np.uint8)
+    for row in range(8):
+        for col in range(8):
+            color = (235, 205, 160) if (row + col) % 2 == 0 else (120, 80, 55)
+            cv2.rectangle(
+                frame,
+                (80 + col * tile, 60 + row * tile),
+                (80 + (col + 1) * tile - 1, 60 + (row + 1) * tile - 1),
+                color,
+                -1,
+            )
+
+    config = AppConfig()
+    config.overlay.visible = False
+    window = module.MainWindow(config)
+    try:
+        assert window.tabs.tabText(0) == "Start"
+        assert "v" in window.windowTitle()
+        window._on_capture(frame, (0.0, 0.0), "snapshot")
+        assert len(window.corners) == 4
+        top_left, top_right, _bottom_right, _bottom_left = window.corners
+        assert top_left[0] < top_right[0]
+        assert abs(top_left[0] - 80) < 14 and abs(top_left[1] - 60) < 14
+        assert window.overlay.corners == window.corners
+
+        window._apply_size_preset(1200, 820)
+        assert window.config.ui.window_width == 1200
+        assert window.config.ui.window_height == 820
+        window._apply_font_scale(140)
+        assert window.config.ui.font_scale_percent == 140
+        window._apply_font_scale(500)
+        assert window.config.ui.font_scale_percent == 200
+
+        window._test_overlay()
+        assert window.overlay.test_mode is True
+
+        window._frame_settings_changed()
+        assert window.overlay.settings.show_frame is True
+
+        window._reset_corners()
+        assert window.corners == []
+        assert window.overlay.corners is None
+    finally:
+        window.close()
+        app.processEvents()

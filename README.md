@@ -1,6 +1,8 @@
-# Stockfish Vision Chess AI
+# Stockfish Vision Chess AI – **v2**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
+
+Neu in **v2**: übersichtlicher Start-Tab mit geführtem Ablauf, einstellbare Programmgröße und Schriftgröße, automatischer roter Brettrahmen (oder manuell per vier Klicks/Rechteck), robustes Overlay mit DPI-Korrektur und Overlay-Test. Details unter [Versionen](#versionen-v1-v2-…).
 
 Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Engine-Varianten. Ein transparentes Overlay stellt bei kalibrierten Snapshots farbige Pfeile und Feldmarkierungen dar. Das unabhängige Analyse-Panel ist verschieb- und skalierbar.
 
@@ -21,7 +23,10 @@ Die PySide6-Oberfläche zeigt Erkennungs-Scores, Stellungsfehler und mehrere Eng
 - Capture und 64-Feld-Erkennung in weiteren Hintergrund-Threads
 - FEN-/PGN-Import und -Export sowie Textexport eines Analyseergebnisses
 - bis zu 50 PGN-Partien pro Datei, Zugnavigation und Kommentare der Hauptvariante
-- transparente, klickdurchlässige Pfeilebene und interaktives Overlay-Panel
+- transparenter roter Brettrahmen, automatisch erkannt oder manuell gesetzt
+- klickdurchlässige Pfeilebene, interaktives Overlay-Panel, DPI-Korrektur für Windows-Skalierung
+- einstellbare Fenstergröße (Voreinstellungen, freie Pixelwerte, maximierter Start) und Schriftgröße
+- geführter Start-Tab mit Statusübersicht und Overlay-Test
 - atomare JSON-Konfiguration, Sicherung defekter Konfigurationen und Protokolldateien
 
 ## Voraussetzungen
@@ -41,7 +46,7 @@ Stockfish ist **nicht** Bestandteil dieses Repositories oder des EXE-Builds.
 - offizieller Quellcode: <https://github.com/official-stockfish/Stockfish>
 - GPLv3-Lizenz: <https://github.com/official-stockfish/Stockfish/blob/master/Copying.txt>
 
-Laden Sie Stockfish nur aus einer vertrauenswürdigen offiziellen Quelle herunter und entpacken Sie es beispielsweise nach `C:\Tools\Stockfish\stockfish.exe`. Prüfen Sie bei Downloads die vom Anbieter angegebenen Signaturen bzw. Hashwerte, sofern vorhanden. Tragen Sie den Pfad anschließend unter **Engine & Overlay** ein.
+Laden Sie Stockfish nur aus einer vertrauenswürdigen offiziellen Quelle herunter und entpacken Sie es beispielsweise nach `C:\Tools\Stockfish\stockfish.exe`. Prüfen Sie bei Downloads die vom Anbieter angegebenen Signaturen bzw. Hashwerte, sofern vorhanden. Tragen Sie den Pfad anschließend unter **4 · Einstellungen** ein.
 
 Alternativen:
 
@@ -80,29 +85,29 @@ Alternativ nach `start.bat`:
 
 Beim ersten Start:
 
-1. **Engine & Overlay** öffnen, `stockfish.exe` auswählen und **Engine starten** wählen.
-2. Für eine sofortige Funktionsprüfung unter **Training & Korrektur** die Grundstellung verwenden und **Trainingsstellung analysieren** wählen.
+1. **4 · Einstellungen** öffnen, `stockfish.exe` auswählen und **Engine starten** wählen.
+2. Für eine sofortige Funktionsprüfung unter **2 · Prüfen** die Grundstellung verwenden und **Trainingsstellung analysieren** wählen.
 3. Für Bilderkennung den folgenden Kalibrierungsworkflow ausführen.
 
 ## Bildschirmaufnahme und Kalibrierung
 
 1. Öffnen Sie eine **ruhende eigene Trainingsstellung** oder ein Diagramm einer abgeschlossenen Partie.
-2. Wählen Sie unter **Aufnahme** einen Monitor oder aktivieren Sie den manuellen Bereich. `L/T` sind die globale linke obere Ecke, `B/H` Breite und Höhe in Bildschirmpixeln.
+2. Wählen Sie unter **1 · Aufnahme** einen Monitor oder aktivieren Sie den manuellen Bereich. `L/T` sind die globale linke obere Ecke, `B/H` Breite und Höhe in Bildschirmpixeln.
 3. Starten Sie optional die Vorschau. Sie dient nur zur Kalibrierung und startet weder Erkennung noch Engine automatisch.
 4. Wählen Sie **Snapshot aufnehmen & Vorschau einfrieren**.
-5. Klicken Sie die äußeren Brettecken in dieser Reihenfolge:
-   - oben links,
-   - oben rechts,
-   - unten rechts,
-   - unten links.
+5. Der Rahmen entsteht auf drei Wegen:
+   - **automatisch:** Ist *Beim Snapshot automatisch rot einrahmen* aktiv, sucht das Programm das Brett direkt nach dem Snapshot und rahmt es rot ein. **Brett jetzt automatisch einrahmen** wiederholt die Suche.
+   - **vier Klicks:** oben links, oben rechts, unten rechts, unten links. Ein fünfter Klick beginnt die Auswahl neu.
+   - **Rechteck aufziehen:** mit gedrückter linker Maustaste ein Rechteck um das Brett ziehen.
 
-   Ein fünfter Klick beginnt die Auswahl neu; **Ecken zurücksetzen** löscht sie vollständig. Das Viereck muss konvex sein und darf nicht überkreuzt sein.
+   **Rahmen / Ecken zurücksetzen** löscht die Auswahl vollständig. Das Viereck muss konvex sein und darf nicht überkreuzt sein.
+   Sitzt der automatische Rahmen nicht exakt, Ecken einzeln nachklicken – der rote Rahmen bleibt auch ohne Engine-Analyse sichtbar.
 6. Wählen Sie die Orientierung aus Sicht des Bildes:
    - `white_bottom`: Weiß unten, normale Ansicht;
    - `white_top`: Weiß oben / Schwarzperspektive;
    - `white_left` / `white_right`: Weiß an der entsprechenden Seite.
 7. Bestätigen Sie den Trainings-/Nachbereitungsrahmen und wählen Sie **Snapshot im Hintergrund erkennen**.
-8. Prüfen Sie unter **Training & Korrektur** Stellung und Scores. Erst danach **Geprüften Snapshot analysieren** wählen.
+8. Prüfen Sie unter **2 · Prüfen** Stellung und Scores. Erst danach **Geprüften Snapshot analysieren** wählen.
 
 Die Kalibrierung bezieht sich auf den ausgewählten Snapshot. Bei geändertem Ausschnitt, verschobenem Brett oder anderer Skalierung muss sie erneut geprüft werden.
 
@@ -137,7 +142,7 @@ Aus Pixeln lassen sich Zugrecht, Rochaderechte, En-passant und Zugzähler nicht 
 - kein En-passant-Feld (`-`);
 - Halbzugzähler `0`, Zugnummer `1`.
 
-Korrigieren Sie diese Felder unter **Training & Korrektur**, bevor Sie analysieren. **FEN übernehmen** erlaubt auch das Bearbeiten einer unvollständigen Stellung; die Engine-Analyse wird jedoch bei fehlenden Königen, ungültigen Rochaderechten, illegalen Bauernstellungen oder anderen Validierungsfehlern blockiert.
+Korrigieren Sie diese Felder unter **2 · Prüfen**, bevor Sie analysieren. **FEN übernehmen** erlaubt auch das Bearbeiten einer unvollständigen Stellung; die Engine-Analyse wird jedoch bei fehlenden Königen, ungültigen Rochaderechten, illegalen Bauernstellungen oder anderen Validierungsfehlern blockiert.
 
 - **FEN importieren:** genau eine Stellung aus `.fen`/`.txt`.
 - **FEN exportieren:** aktuelle vollständige FEN.
@@ -145,7 +150,7 @@ Korrigieren Sie diese Felder unter **Training & Korrektur**, bevor Sie analysier
 
 ## Stockfish-Analyse
 
-Unter **Engine & Overlay**:
+Unter **4 · Einstellungen**:
 
 - **Suchtiefe `0`:** keine Tiefenbegrenzung, nur Zeit verwenden;
 - **Zeit `0 ms`:** keine Zeitbegrenzung, nur Tiefe verwenden;
@@ -167,7 +172,42 @@ Wenn sich die Stellung während einer Suche ändert, bleibt das Ergebnis in der 
 - Das Panel ist interaktiv. Die separate Pfeilebene bleibt klickdurchlässig.
 - PV1–PV5 verwenden unterschiedliche Farben; Start- und Zielfelder werden als perspektivisch transformierte Polygone markiert.
 
-Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. Bei internen FEN-/PGN-Stellungen zeigt das Overlay nur das Analyse-Panel, damit keine Pfeile auf ein nicht zugehöriges Bildschirmbrett projiziert werden.
+### Roter Brettrahmen
+
+- Der Rahmen wird aus den vier kalibrierten Ecken perspektivisch gezeichnet und ist auch ohne Engine-Ergebnis sichtbar.
+- **Rahmenbreite** und **Rahmenfarbe** sind unter *4 · Einstellungen → Overlay und Brettrahmen* einstellbar (Standard: `#ff2d2d`, 5 px).
+- Der Rahmen erscheint erst nach einem Snapshot mit Kalibrierung; bei internen FEN-/PGN-Stellungen ohne Aufnahme bleibt er aus.
+
+### Wenn das Overlay „nicht funktioniert“
+
+1. **Overlay testen** (Start-Tab oder Einstellungen) zeigt Panel, Rahmen und einen Demo-Pfeil ohne Engine.
+2. Statuszeile im Overlay-Panel nennt den Grund: keine Analyse, kein Rahmen oder Overlay ausgeblendet.
+3. Windows-Skalierung (125/150/200 %): Die Umrechnung von Aufnahmepixeln in Fensterkoordinaten erfolgt automatisch über die DPI-Faktoren der Monitore. Falls Pfeile dennoch versetzt sind – vor allem bei **gemischter Skalierung mehrerer Monitore** –, unter *4 · Einstellungen → DPI-Korrektur* denselben Prozentwert wie die Windows-Skalierung einstellen (`0 %` = automatisch).
+4. Der Hotkey schaltet das Overlay nur ein/aus; die GUI-Schaltfläche funktioniert unabhängig davon.
+
+Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. Bei internen FEN-/PGN-Stellungen zeigt das Overlay nur das Analyse-Panel und – falls kalibriert – den Rahmen.
+
+## Programmgröße und Schriftgröße
+
+*4 · Einstellungen → Programmgröße und Darstellung*:
+
+- **Fenstergröße:** Breite/Höhe in Pixeln eintragen und **Fenstergröße anwenden** wählen (wird gespeichert).
+- **Voreinstellungen:** *Klein* (1100 × 760), *Mittel* (1380 × 900), *Groß* (1680 × 1050).
+- **Beim Start maximiert:** startet bildschirmfüllend.
+- **Schriftgröße:** 70–200 % wirken auf alle Bedienelemente, inklusive Tabellen; `Strg ++`, `Strg +-` und `Strg +0` ändern sie direkt.
+- Auch das Menü **Ansicht** enthält diese Funktionen, zusätzlich *Aktuelle Fenstergröße übernehmen*.
+
+Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
+
+## Versionen (v1, v2, …)
+
+Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
+
+- im Fenstertitel (`Stockfish Vision Chess AI v2 – Trainingsmodus`),
+- groß im Start-Tab,
+- unter **Hilfe → Version / Info** samt Änderungsliste.
+
+Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v3"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
 
 ## PGN-Nachbereitung und Export
 
@@ -201,7 +241,7 @@ Das Standardmodell liegt unter:
 src\stockfish_vision\assets\models\piece_hog_svm.xml
 ```
 
-Ein kompatibles alternatives OpenCV-XML kann unter **Engine & Overlay → Figurenmodell** gewählt werden. Es muss dieselben zwölf Klassen und 324 HOG-Merkmale verwenden. Nach einem Modellwechsel wird der Klassifikator neu aufgebaut.
+Ein kompatibles alternatives OpenCV-XML kann unter **4 · Einstellungen → Figurenmodell** gewählt werden. Es muss dieselben zwölf Klassen und 324 HOG-Merkmale verwenden. Nach einem Modellwechsel wird der Klassifikator neu aufgebaut.
 
 Modell reproduzierbar neu erzeugen:
 
@@ -218,9 +258,9 @@ Dabei entsteht neben der XML eine JSON-Metadatendatei mit Klassen, HOG-Parameter
 .venv\Scripts\python.exe -m ruff check src tests scripts
 ```
 
-Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
+Die Tests decken unter anderem Koordinaten, Perspektivkalibrierung, automatische Brettecken-Erkennung, DPI-Umrechnung des Overlays, FEN, Dateiimport/-export, PGN, Konfiguration, Hotkey-Parsing, Fairness-Sperren, SVM-Voting und variable Konfidenzscores, Belegung, fehlende Modelle, Templates und UCI mit einer echten lokalen Fake-UCI-Engine ab. Die Fake-Engine ist ausdrücklich **kein Stockfish** und dient nur der Protokollprüfung.
 
-`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten sowie den Hauptfenster-Lebenszyklus. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
+`tests/test_gui_smoke.py` erzeugt auf einem System mit vollständigen nativen Qt-Bibliotheken ein Offscreen-Fenster und prüft Brettkoordinaten, den Hauptfenster-Lebenszyklus, die automatische Einrahmung, den Overlay-Test sowie Fenster- und Schriftgröße. Auf minimalen Headless-Systemen ohne `libGL` wird dieses Modul übersprungen; das ist kein bestandener GUI-Test.
 
 Für den optionalen echten Stockfish-Integrationstest setzen Sie `STOCKFISH_PATH` auf die offizielle Binary und führen denselben Testbefehl aus. Dann wird zusätzlich `tests/test_stockfish_integration.py` ausgeführt; ohne diese Umgebungsvariable wird nur dieser optionale Test übersprungen. Der automatische Standardtest benötigt keinen Stockfish-Download.
 
@@ -250,7 +290,10 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Ungültige FEN:** Könige, Zugrecht, Rochaderechte, En-passant und Bauern auf Grundreihen prüfen.
 - **Hotkey belegt:** andere Kombination wählen und erneut anwenden; die GUI-Schaltfläche funktioniert unabhängig davon.
 - **Kein Bildschirmzugriff:** Monitorindex/Bereich prüfen und sicherstellen, dass keine Restriktion des Systems die Aufnahme verhindert.
-- **Overlay falsch platziert:** nach Verschieben des Bildschirmbretts Snapshot und Kalibrierung erneuern. Multi-Monitor-/DPI-Einstellungen nach einer Änderung ebenfalls neu prüfen.
+- **Overlay falsch platziert:** nach Verschieben des Bildschirmbretts Snapshot und Kalibrierung erneuern. Multi-Monitor-/DPI-Einstellungen nach einer Änderung ebenfalls neu prüfen; notfalls **DPI-Korrektur** manuell setzen.
+- **Overlay zeigt nichts:** **Overlay testen** wählen. Erscheint nur das Panel, fehlt die Kalibrierung (Rahmen) bzw. eine Analyse (Pfeile).
+- **Automatischer Rahmen trifft nicht:** Brett vollständig im Aufnahmebereich zeigen, Rahmenkontrast erhöhen oder Ecken per Klick/Rechteck setzen.
+- **Schrift zu klein/groß:** *4 · Einstellungen → Schriftgröße* oder `Strg ++` / `Strg +-`.
 
 ## Projektstruktur
 
@@ -261,8 +304,10 @@ src/stockfish_vision/
   recognition/   Belegung, HOG-SVM, Scores, Session-Templates
   chesslogic/    FEN, PGN, Validierung, taktische Hinweise
   engine/        UCI-Client und Ergebnisdaten
-  gui/           PySide6-Fenster und Hintergrund-Worker
-  overlay/       Pfeilebene, interaktives Panel, Windows-Hotkey
+  board/detect.py automatische Brettecken-Erkennung
+  gui/           PySide6-Fenster, Theme/Schriftgröße, Hintergrund-Worker
+  version.py     Versionsschema v1, v2, …
+  overlay/       Pfeilebene, roter Rahmen, Koordinaten-/DPI-Umrechnung, Hotkey
   assets/models/ mitgeliefertes OpenCV-Modell
   config.py      validierte JSON-Einstellungen
   policy.py      Trainings-/Snapshot-/PGN-Freigaben

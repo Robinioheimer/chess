@@ -29,7 +29,7 @@ if not exist "src\stockfish_vision\assets\models\piece_hog_svm.xml" (
 )
 echo.
 echo Setup fertig. Stockfish separat von https://stockfishchess.org/download/ installieren.
-echo Pfad in der GUI unter "Engine ^& Overlay" setzen, danach start.bat ausfuehren.
+echo Pfad in der GUI unter "4 · Einstellungen" setzen, danach start.bat ausfuehren.
 endlocal
 exit /b 0
 :error
