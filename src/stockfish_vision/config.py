@@ -72,6 +72,8 @@ class AppConfig:
     capture: CaptureSettings = field(default_factory=CaptureSettings)
     ui: UiSettings = field(default_factory=UiSettings)
     last_fen: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    training_acknowledged: bool = True
+    training_acknowledged_at: str = ""
     side_to_move: str = "w"
     occupancy_std_threshold: float = 18.0
     min_piece_confidence: float = 0.45
@@ -90,6 +92,8 @@ class AppConfig:
         cfg.capture = CaptureSettings(**_merge(CaptureSettings, _section(data, "capture")))
         cfg.ui = UiSettings(**_merge(UiSettings, _section(data, "ui")))
         cfg.last_fen = str(data.get("last_fen", cfg.last_fen))
+        cfg.training_acknowledged = bool(data.get("training_acknowledged", True))
+        cfg.training_acknowledged_at = str(data.get("training_acknowledged_at", ""))
         cfg.side_to_move = str(data.get("side_to_move", cfg.side_to_move))
         cfg.occupancy_std_threshold = data.get(
             "occupancy_std_threshold", cfg.occupancy_std_threshold

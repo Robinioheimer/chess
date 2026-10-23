@@ -1,8 +1,12 @@
-# Stockfish Vision Chess AI – **v5**
+# Stockfish Vision Chess AI – **v6**
 
 Windows-10/11-Anwendung für **eigene Schachstellungen, Training und Nachbereitung abgeschlossener Partien**. Sie erfasst einen manuell ausgewählten Bildschirmbereich, kalibriert ein Schachbrett über vier Punkte, erkennt Figuren mit OpenCV/HOG-SVM, rekonstruiert eine FEN und analysiert gültige Stellungen über eine separat installierte Stockfish-UCI-Engine.
 
-Neu in **v5**: Die Ausschnitt-Auswahl deckt jetzt immer den **kompletten Desktop** ab (auch mehrere Monitore, negative Koordinaten und hohe Windows-Skalierung) – vorher konnte das Auswahlfenster kleiner als der Bildschirm sein. Das Helfer-Popup ist breiter, lässt sich **am rechten Rand ziehen** und merkt sich seine Breite. Details unter [Versionen](#versionen-v1-v2-v4-v5-…).
+Neu in **v6**: Die Oberfläche ist jetzt **hell** – weißer Hintergrund, schwarzer Text, graue Akzente (Grün nur noch als Bedeutung „erledigt“, Rot/Orange nur für Warnungen). Die Ausschnitt-Auswahl legt für **jeden Monitor eine eigene Ebene** über den kompletten Bildschirm, sodass wirklich der ganze Desktop bedeckt ist. Die Zustimmung zum Trainingsmodus wird **automatisch** erteilt und nicht mehr per Checkbox abgefragt. Details unter [Versionen](#versionen-v1-v2-v4-v5-v6-…).
+
+Neu in **v5**: Die Ausschnitt-Auswahl deckt jetzt immer den **kompletten Desktop** ab (auch mehrere Monitore, negative Koordinaten und hohe Windows-Skalierung) – vorher konnte das Auswahlfenster kleiner als der Bildschirm sein. Das Helfer-Popup ist breiter, lässt sich **am rechten Rand ziehen** und merkt sich seine Breite.
+
+Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.)
 
 Neu in **v4**: Die Einrichtung läuft über ein eigenes **Windows-Popup** statt über ein Fenster in der App. Der Bildschirmausschnitt wird mit der **Maus** aufgezogen, das Helfer-Fenster führt durch die drei Schritte und bleibt zusammen mit dem Overlay dauerhaft im Vordergrund – die trainierte Seite im Browser wird nicht mehr verdrängt. (v3 wurde übersprungen; v2 brachte Start-Tab, Größen-/Schriftsteuerung, automatischen roten Rahmen.) Details unter [Versionen](#versionen-v1-v2-v4-…).
 
@@ -129,7 +133,7 @@ Damit die trainierte Seite (z. B. Google im Browser) sichtbar bleibt, bringen Po
    - `white_bottom`: Weiß unten, normale Ansicht;
    - `white_top`: Weiß oben / Schwarzperspektive;
    - `white_left` / `white_right`: Weiß an der entsprechenden Seite.
-7. Bestätigen Sie den Trainings-/Nachbereitungsrahmen und wählen Sie **Snapshot im Hintergrund erkennen**.
+7. Der Trainingsrahmen ist automatisch bestätigt (siehe Hinweis *Trainingsmodus aktiv*); wählen Sie **Snapshot im Hintergrund erkennen**.
 8. Prüfen Sie unter **2 · Prüfen** Stellung und Scores. Erst danach **Geprüften Snapshot analysieren** wählen.
 
 Die Kalibrierung bezieht sich auf den ausgewählten Snapshot. Bei geändertem Ausschnitt, verschobenem Brett oder anderer Skalierung muss sie erneut geprüft werden.
@@ -222,21 +226,22 @@ Bildschirmpfeile erscheinen nur für einen analysierten, kalibrierten Snapshot. 
 
 Alle Werte landen in der Konfiguration (`ui`-Abschnitt) und gelten beim nächsten Start.
 
-## Versionen (v1, v2, v4, v5, …)
+## Versionen (v1, v2, v4, v5, v6, …)
 
 Jede neue Fassung erhält die nächste laufende Nummer. Die Version steht zentral in `src/stockfish_vision/version.py` und erscheint
 
-- im Fenstertitel (`Stockfish Vision Chess AI v5 – Trainingsmodus`),
+- im Fenstertitel (`Stockfish Vision Chess AI v6 – Trainingsmodus`),
 - im Titel des Einrichtungs-Popups,
 - groß im Start-Tab,
 - unter **Hilfe → Version / Info** samt Änderungsliste.
 
-Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v5"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
+Für eine neue Fassung genügen dort `APP_VERSION` (z. B. `"v6"`) und ein neuer Eintrag in `VERSION_HISTORY`; `pyproject.toml` erhält die passende `version`.
 
 - `v1` – Grundfassung
 - `v2` – Start-Tab, Größen/Schrift, roter Rahmen, Overlay-DPI
 - `v4` – Popup-Einrichtung, Maus-Ausschnitt, Vordergrund-Wächter (**v3 übersprungen**)
 - `v5` – Größenkorrektur: Auswahl über den ganzen Desktop, Popup breiter und frei skalierbar
+- `v6` – helles Design (Weiß/Grau/Schwarz), Auswahl-Ebene je Monitor über den ganzen Bildschirm, automatische Trainings-Zustimmung
 
 > Hinweis zu den Formulierungen: Das Popup ersetzt nicht die Kalibrierung, sondern führt zu ihr hin – der Ausschnitt wird per Maus gesetzt, danach rastet die automatische Brettecken-Erkennung ein.
 
@@ -329,6 +334,8 @@ PyInstaller ist kein Cross-Compiler: Ein Windows-Build kann nicht unter Linux er
 - **Ausschnitt sitzt falsch:** erneut „Bereich mit der Maus wählen“; der Rahmen wird bei jeder Auswahl neu gesetzt.
 - **Auswahl-Ebene erreicht den Bildschirmrand nicht:** in v5 behoben. Sie bedeckt jetzt alle Monitore samt Rand. Das Log (`%APPDATA%\StockfishVisionChessAI\logs\`) protokolliert die tatsächliche Auswahlgröße.
 - **Popup zu schmal/breit:** rechten Fensterrand ziehen oder *4 · Einstellungen → Popup-Breite* setzen.
+- **Auswahl bedeckt nur einen Teil / einen Monitor:** in v6 behoben. Das Programm legt je Monitor eine eigene Auswahl-Ebene an; das Log nennt Anzahl und Rechtecke der Ebenen. Bleibt eine Stelle unbedeckt, Skalierung prüfen und erneut starten.
+- **Zustimmung zum Trainingsmodus:** wird automatisch erteilt und mit Zeitstempel in `config.json` (`training_acknowledged`, `training_acknowledged_at`) festgehalten – es gibt keine Checkbox mehr.
 - **Browser verdrängt Popup:** Fenstermodus statt `F11`-Vollbild verwenden; der Wächter holt das Popup alle zwei Sekunden zurück.
 
 ## Projektstruktur

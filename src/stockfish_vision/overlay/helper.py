@@ -11,11 +11,14 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-PANEL_BG = QColor(18, 22, 28, 238)
-BORDER = QColor(90, 110, 125, 180)
-ACCENT = QColor(255, 45, 45)
-DONE = QColor(118, 216, 150)
-PENDING = QColor(140, 152, 162)
+PANEL_BG = QColor(255, 255, 255, 245)
+BORDER = QColor(190, 194, 199)
+ACCENT = QColor(107, 114, 128)
+DONE = QColor(31, 122, 63)
+PENDING = QColor(140, 146, 153)
+TEXT = QColor(17, 18, 20)
+TEXT_MUTED = QColor(91, 96, 103)
+FRAME_RED = QColor(214, 48, 40)
 WIDTH = 460
 MIN_WIDTH = 340
 MAX_WIDTH = 1400
@@ -68,15 +71,16 @@ class HelperPopup(QWidget):
 
         title_row = QHBoxLayout()
         title = QLabel("Brett einrichten")
-        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #f2f5f7;")
+        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #111214;")
         version_label = QLabel(version)
-        version_label.setStyleSheet("color:#7fd6a1; font-weight:600;")
+        version_label.setStyleSheet("color:#5b6067; font-weight:600;")
         self.close_button = QPushButton("✕")
         self.close_button.setFixedSize(26, 26)
         self.close_button.setToolTip("Helfer ausblenden (Hotkey oder Start-Tab zeigt ihn wieder)")
         self.close_button.setStyleSheet(
-            "QPushButton { background:#2b333c; border-radius:13px; color:#d5dde5; }"
-            "QPushButton:hover { background:#3a444f; }"
+            "QPushButton { background:#f1f2f4; border:1px solid #cfd1d4;"
+            " border-radius:13px; color:#33383e; }"
+            "QPushButton:hover { background:#e3e5e8; }"
         )
         self.close_button.clicked.connect(self._hide_by_user)
         title_row.addWidget(title)
@@ -92,7 +96,7 @@ class HelperPopup(QWidget):
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(46)
-        self.status_label.setStyleSheet("color:#c9d4de;")
+        self.status_label.setStyleSheet("color:#33383e;")
         layout.addWidget(self.status_label)
 
         self.select_button = QPushButton("Ausschnitt mit der Maus wählen")
@@ -118,14 +122,15 @@ class HelperPopup(QWidget):
         self.hide_button.clicked.connect(self._hide_by_user)
         for button in (self.settings_button, self.test_button, self.hide_button):
             button.setStyleSheet(
-                "QPushButton { background:#243038; padding:6px 8px; font-size:12px; }"
-                "QPushButton:hover { background:#31404b; }"
+                "QPushButton { background:#f4f5f6; border:1px solid #cfd1d4;"
+                " padding:6px 8px; font-size:12px; color:#33383e; }"
+                "QPushButton:hover { background:#e7e8eb; }"
             )
             small_row.addWidget(button)
         layout.addLayout(small_row)
 
         self.hint_label = QLabel("Ziehen verschiebt das Fenster")
-        self.hint_label.setStyleSheet("color:#8a97a3; font-size:11px;")
+        self.hint_label.setStyleSheet("color:#5b6067; font-size:11px;")
         layout.addWidget(self.hint_label)
 
         self._refresh()
@@ -175,7 +180,7 @@ class HelperPopup(QWidget):
                 color = DONE.name()
                 marker = "✔"
             elif index == self.step:
-                color = "#ff8a80"
+                color = "#111214"
                 marker = "●"
             else:
                 color = PENDING.name()
@@ -261,9 +266,9 @@ class HelperPopup(QWidget):
         painter.setBrush(PANEL_BG)
         painter.setPen(QPen(BORDER, 1))
         painter.drawRoundedRect(QRect(0, 0, self.width() - 1, self.height() - 1), 12, 12)
-        painter.setPen(QPen(ACCENT, 3))
+        painter.setPen(QPen(FRAME_RED, 3))
         painter.drawLine(16, 2, 120, 2)
-        grip = QColor(120, 132, 144, 200)
+        grip = QColor(150, 155, 161, 220)
         painter.setPen(QPen(grip, 2))
         for offset in (0, 5, 10):
             painter.drawLine(
@@ -272,7 +277,7 @@ class HelperPopup(QWidget):
                 self.width() - 8,
                 self.height() - 14 - offset,
             )
-        painter.setPen(QColor(140, 152, 162))
+        painter.setPen(TEXT_MUTED)
         font = QFont("Segoe UI", 8)
         painter.setFont(font)
         text = QFontMetrics(font).elidedText(

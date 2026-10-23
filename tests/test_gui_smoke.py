@@ -220,14 +220,14 @@ def test_main_window_mouse_region_flow_with_helper_popup(app, monkeypatch) -> No
         app.processEvents()
 
 
-def test_version_is_v5() -> None:
+def test_version_is_v6() -> None:
     from stockfish_vision.version import APP_VERSION, VERSION_HISTORY, full_version_label
 
-    assert APP_VERSION == "v5"
-    assert "v5" in full_version_label()
+    assert APP_VERSION == "v6"
+    assert "v6" in full_version_label()
     labels = [label for label, _text in VERSION_HISTORY]
-    assert labels[-1] == "v5"
-    assert labels == ["v1", "v2", "v4", "v5"]
+    assert labels[-1] == "v6"
+    assert labels == ["v1", "v2", "v4", "v5", "v6"]
 
 
 def test_popup_width_is_configurable_and_persisted(app, monkeypatch) -> None:
@@ -263,3 +263,64 @@ def test_popup_width_is_configurable_and_persisted(app, monkeypatch) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_training_consent_is_automatic(app, monkeypatch) -> None:
+    from stockfish_vision.capture.screen import MonitorInfo
+    from stockfish_vision.config import AppConfig
+    from stockfish_vision.gui import main_window as module
+
+    monkeypatch.setattr(
+        module, "list_monitors", lambda: [MonitorInfo(1, 0, 0, 1200, 900, "Testmonitor")]
+    )
+    monkeypatch.setattr(module.WindowsHotkeyFilter, "register", lambda self: None)
+    monkeypatch.setattr(module, "save_config", lambda config, path=None: None)
+
+    config = AppConfig()
+    config.overlay.visible = False
+    window = module.MainWindow(config)
+    try:
+        # Keine Checkbox mehr, Zustimmung ist gesetzt und dokumentiert.
+        assert not hasattr(window, "confirm_box")
+        assert window.snapshot_confirmed is True
+        assert window.config.training_acknowledged is True
+        assert window.config.training_acknowledged_at
+        assert "automatisch" in window.training_notice.text()
+
+        # Auch ein alter Konfigurationsstand ohne Zustimmung wird automatisch gesetzt.
+        window.config.training_acknowledged = False
+        window.config.training_acknowledged_at = ""
+        window._record_training_acknowledgement()
+        assert window.config.training_acknowledged is True
+        assert window.config.training_acknowledged_at
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_theme_is_light_and_grey(app) -> None:
+    from stockfish_vision.gui import theme
+
+    assert theme.BACKGROUND.lower() == "#ffffff"
+    assert theme.TEXT.lower() == "#111214"
+    stylesheet = theme.build_stylesheet()
+    lowered = stylesheet.lower()
+    # Helles Grunddesign: kein dunkles Fenster, kein Grün als Akzentfarbe.
+    for forbidden in ("#121417", "#171a1f", "#2e7d4f", "#1b1f24"):
+        assert forbidden not in lowered
+    assert theme.BACKGROUND.lower() in lowered
+    assert theme.TEXT.lower() in lowered
+    # Grün bleibt reine Bedeutungsfarbe, Rot/Orange nur für Warnungen.
+    assert theme.SUCCESS.lower() == "#1f7a3f"
+    assert theme.ERROR.lower() == "#b3261e"
+
+
+def test_overlay_surfaces_are_light(app) -> None:
+    from stockfish_vision.overlay import helper, selector, window
+
+    for module in (helper, selector):
+        bg = module.PANEL_BG
+        assert bg.red() > 235 and bg.green() > 235 and bg.blue() > 235
+        assert module.TEXT.red() < 60 and module.TEXT.green() < 60
+    # Analyse-Panel zeichnet einen hellen Kasten mit dunkler Schrift.
+    assert window.PANEL_BG.red() > 235 and window.TEXT.red() < 60
