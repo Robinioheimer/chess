@@ -187,3 +187,59 @@ def test_selector_covers_full_desktop_and_adds_edge_margin(app) -> None:
     screen = app.primaryScreen().geometry()
     assert expected.width() >= screen.width() + 2 * EDGE_MARGIN
     selector.close()
+
+
+def test_region_selection_opens_one_layer_per_screen(app) -> None:
+    from stockfish_vision.overlay.selector import RegionSelection
+
+    session = RegionSelection()
+    selection = RegionSelection()
+    regions = [screen.geometry() for screen in app.screens()]
+    selection.start()
+    try:
+        assert len(selection.selectors) == len(regions)
+        assert selection.active() is True
+        for selector, region in zip(selection.selectors, regions, strict=True):
+            # Jede Ebene deckt ihren Bildschirm vollständig ab (plus 1 px Rand).
+            assert selector.geometry().width() >= region.width()
+            assert selector.geometry().height() >= region.height()
+            assert selector.minimumWidth() >= region.width()
+        selection.cancel()
+        assert selection.active() is False
+        assert all(not selector.isVisible() for selector in selection.selectors)
+    finally:
+        session.close()
+        selection.close()
+
+
+def test_region_selection_emits_single_selection(app) -> None:
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from stockfish_vision.overlay.selector import RegionSelection
+
+    session = RegionSelection()
+    results: list = []
+    session.selected.connect(results.append)
+    session.start()
+    first = session.selectors[0]
+
+    def event(kind: QEvent.Type, x: int, y: int, buttons: Qt.MouseButton):
+        local = QPoint(x, y)
+        return QMouseEvent(
+            kind,
+            local,
+            first.mapToGlobal(local),
+            Qt.MouseButton.LeftButton,
+            buttons,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+    first.mousePressEvent(event(QEvent.Type.MouseButtonPress, 40, 40, Qt.MouseButton.LeftButton))
+    first.mouseMoveEvent(event(QEvent.Type.MouseMove, 140, 130, Qt.MouseButton.LeftButton))
+    first.mouseReleaseEvent(event(QEvent.Type.MouseButtonRelease, 240, 230, Qt.MouseButton.NoButton))
+
+    assert len(results) == 1
+    assert results[0].width() >= 150 and results[0].height() >= 150
+    assert session.active() is False
+    session.close()

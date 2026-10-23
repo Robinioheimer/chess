@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -16,8 +16,10 @@ from stockfish_vision.overlay.topmost import ensure_topmost
 
 logger = logging.getLogger(__name__)
 
-PANEL_BG = QColor(16, 19, 23, 235)
-ACCENT = QColor(255, 45, 45)
+PANEL_BG = QColor(255, 255, 255, 242)
+ACCENT = QColor(107, 114, 128)
+TEXT = QColor(17, 18, 20)
+TEXT_MUTED = QColor(91, 96, 103)
 MIN_SIZE = 24
 EDGE_MARGIN = 2
 
@@ -68,15 +70,17 @@ class RegionSelector(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.prompt = "Ziehe einen Rahmen um das Spielfeld"
+        self.prompt = "Rahmen mit der Maus um das Spielfeld ziehen"
         self.hint = "Esc bricht ab"
         self._origin: QPoint | None = None
         self._current: QPoint | None = None
         self._finished = False
+        self.target_geometry: QRect | None = None
 
     # ------------------------------------------------------------- Steuerung
-    def start(self) -> None:
-        geometry = full_screen_geometry()
+    def start(self, geometry: QRect | None = None) -> None:
+        geometry = geometry or full_screen_geometry()
+        self.target_geometry = geometry
         self._origin = None
         self._current = None
         self._finished = False
@@ -106,10 +110,10 @@ class RegionSelector(QWidget):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        geometry = full_screen_geometry()
-        if not geometry.isNull() and geometry.isValid() and self.geometry() != geometry:
-            self.setMinimumSize(geometry.size())
-            self.setGeometry(geometry)
+        target = self.target_geometry or full_screen_geometry()
+        if not target.isNull() and target.isValid() and self.geometry() != target:
+            self.setMinimumSize(target.size())
+            self.setGeometry(target)
 
     def selection(self) -> QRect:
         if self._origin is None or self._current is None:
@@ -178,7 +182,7 @@ class RegionSelector(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         full = self.rect()
         selection = self.selection()
-        dim = QColor(0, 0, 0, 140)
+        dim = QColor(255, 255, 255, 165)
         if selection.isNull() or selection.width() < 2 or selection.height() < 2:
             painter.fillRect(full, dim)
         else:
@@ -219,17 +223,17 @@ class RegionSelector(QWidget):
         box = QRect(0, 0, box_width, box_height)
         box.moveCenter(QPoint(full.center().x(), full.bottom() - round(70 * scale)))
         painter.setBrush(PANEL_BG)
-        painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        painter.setPen(QPen(QColor(190, 194, 199), 1))
         painter.drawRoundedRect(box, 10, 10)
         painter.setFont(font)
-        painter.setPen(QColor(240, 245, 250))
+        painter.setPen(TEXT)
         painter.drawText(
             QRect(box.left(), box.top() + round(10 * scale), box.width(), round(26 * scale)),
             Qt.AlignmentFlag.AlignCenter,
             self.prompt,
         )
         painter.setFont(small)
-        painter.setPen(QColor(160, 172, 184))
+        painter.setPen(TEXT_MUTED)
         painter.drawText(
             QRect(box.left(), box.top() + round(40 * scale), box.width(), round(22 * scale)),
             Qt.AlignmentFlag.AlignCenter,
@@ -255,3 +259,79 @@ class RegionSelector(QWidget):
         painter.drawRoundedRect(label, 5, 5)
         painter.setPen(QColor(255, 255, 255))
         painter.drawText(label, Qt.AlignmentFlag.AlignCenter, text)
+
+
+class RegionSelection(QObject):
+    """Öffnet die Auswahl-Ebene auf **jedem** Bildschirm.
+
+    Ein einzelnes Fenster über die Vereinigung aller Bildschirme reicht unter
+    Windows nicht aus: Qt rechnet in logischen Pixeln, und bei Skalierung
+    (125/150/200 %) oder gemischten DPI-Werten bleibt dann ein Teil des
+    Desktops unbedeckt. Deshalb bekommt jeder Monitor seine eigene,
+    exakt passende Auswahl-Ebene.
+    """
+
+    selected = Signal(QRect)  # globale logische Pixel
+    cancelled = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.selectors: list[RegionSelector] = []
+        self._finished = False
+
+    def _screen_geometries(self) -> list[QRect]:
+        geometries: list[QRect] = []
+        for screen in QGuiApplication.screens():
+            geometry = screen.geometry()
+            if geometry.isValid() and not geometry.isNull():
+                geometries.append(geometry)
+        if not geometries:
+            fallback = full_screen_geometry()
+            if not fallback.isNull() and fallback.isValid():
+                geometries.append(fallback)
+        return geometries
+
+    def start(self) -> None:
+        self.close()
+        self._finished = False
+        geometries = self._screen_geometries()
+        logger.info("Auswahl-Ebene auf %s Bildschirm(en): %s", len(geometries), [g.getRect() for g in geometries])
+        for geometry in geometries:
+            selector = RegionSelector()
+            # Ein Pixel Überlappung, damit auch die äußerste Kante erreichbar ist.
+            selector.target_geometry = geometry.adjusted(-1, -1, 1, 1)
+            selector.selected.connect(self._on_selected)
+            selector.cancelled.connect(self._on_cancelled)
+            self.selectors.append(selector)
+            selector.start(selector.target_geometry)
+        if not self.selectors:
+            self.cancelled.emit()
+
+    def _hide_all(self) -> None:
+        for selector in self.selectors:
+            selector.hide()
+
+    def _on_selected(self, rect: QRect) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self._hide_all()
+        self.selected.emit(rect)
+
+    def _on_cancelled(self) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self._hide_all()
+        self.cancelled.emit()
+
+    def cancel(self) -> None:
+        self._on_cancelled()
+
+    def active(self) -> bool:
+        return bool(self.selectors) and not self._finished
+
+    def close(self) -> None:
+        for selector in self.selectors:
+            selector.close()
+        self.selectors.clear()

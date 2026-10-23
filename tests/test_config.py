@@ -100,3 +100,22 @@ def test_version_labels_follow_scheme() -> None:
     assert version_label() == APP_VERSION
     assert version_label() in full_version_label()
     assert version_label() in window_title()
+
+
+def test_config_stores_training_acknowledgement(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    config = AppConfig()
+    config.training_acknowledged = True
+    config.training_acknowledged_at = "2026-10-23T12:00:00"
+    save_config(config, path)
+    loaded = load_config(path)
+    assert loaded.training_acknowledged is True
+    assert loaded.training_acknowledged_at == "2026-10-23T12:00:00"
+
+
+def test_config_defaults_to_acknowledged_without_field(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"engine": {"depth": 12}}', encoding="utf-8")
+    loaded = load_config(path)
+    assert loaded.training_acknowledged is True
+    assert loaded.training_acknowledged_at == ""

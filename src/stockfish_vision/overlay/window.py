@@ -71,6 +71,15 @@ VARIANT_COLORS = [
     QColor(230, 126, 34, 230),
 ]
 
+PANEL_BG = QColor(255, 255, 255, 240)
+BORDER = QColor(190, 194, 199)
+ACCENT = QColor(107, 114, 128)
+TEXT = QColor(17, 18, 20)
+TEXT_SOFT = QColor(51, 56, 62)
+TEXT_MUTED = QColor(91, 96, 103)
+PENDING = QColor(140, 146, 153)
+WARNING_TEXT = QColor(154, 91, 0)
+
 PANEL_MIN_WIDTH = 220
 PANEL_MIN_HEIGHT = 130
 
@@ -92,7 +101,7 @@ class OverlayPanel(QWidget):
         self.result: AnalysisResult | None = None
         self.status_text = "Noch keine Analyse."
         self.scale_percent = 100
-        self.accent = QColor("#ff2d2d")
+        self.accent = QColor("#6b7280")
         self._drag_start: QPointF | None = None
         self._initial_geometry = QRect()
         self._resizing = False
@@ -154,8 +163,8 @@ class OverlayPanel(QWidget):
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(18, 22, 28, 224))
-        painter.setPen(QPen(QColor(90, 110, 125, 180), 1))
+        painter.setBrush(PANEL_BG)
+        painter.setPen(QPen(BORDER, 1))
         painter.drawRoundedRect(QRect(0, 0, self.width() - 1, self.height() - 1), 10, 10)
         painter.setPen(QPen(self.accent, 3))
         painter.drawLine(12, 2, min(self.width() - 12, 150), 2)
@@ -166,23 +175,23 @@ class OverlayPanel(QWidget):
         metrics = QFontMetrics(body_font)
 
         painter.setFont(title_font)
-        painter.setPen(self.accent.lighter(130))
+        painter.setPen(self.accent.darker(115))
         painter.drawText(14, 24, "TRAINING / ANALYSE")
-        painter.setPen(QColor(160, 172, 184))
+        painter.setPen(TEXT_MUTED)
         painter.setFont(body_font)
         painter.drawText(self.width() - metrics.horizontalAdvance("ziehen ⠿") - 12, 24, "ziehen ⠿")
 
         y = 45
         line_height = max(18, round(23 * scale))
         if self.result is None:
-            painter.setPen(QColor(210, 219, 228))
+            painter.setPen(TEXT_SOFT)
             text = metrics.elidedText(
                 self.status_text or "Noch keine Analyse.",
                 Qt.TextElideMode.ElideRight,
                 max(40, self.width() - 28),
             )
             painter.drawText(14, y, text)
-            painter.setPen(QColor(140, 152, 162))
+            painter.setPen(ACCENT)
             hint = metrics.elidedText(
                 "Engine starten · Stellung analysieren · Overlay-Test in den Einstellungen",
                 Qt.TextElideMode.ElideRight,
@@ -191,7 +200,7 @@ class OverlayPanel(QWidget):
             if self.height() > 90:
                 painter.drawText(14, y + line_height, hint)
         else:
-            painter.setPen(QColor(236, 240, 241))
+            painter.setPen(TEXT)
             header = f"{self.result.engine_id} · {self.result.check}"
             painter.drawText(
                 14,
@@ -205,7 +214,7 @@ class OverlayPanel(QWidget):
                 prefix = f"PV{line.multipv}  {line.score_text:>6}  "
                 painter.setPen(VARIANT_COLORS[(line.multipv - 1) % len(VARIANT_COLORS)])
                 painter.drawText(14, y, prefix)
-                painter.setPen(QColor(236, 240, 241))
+                painter.setPen(TEXT)
                 available = max(40, self.width() - 28 - metrics.horizontalAdvance(prefix))
                 text = metrics.elidedText(
                     line.pv_san or "Keine Zugfolge", Qt.TextElideMode.ElideRight, available
@@ -215,7 +224,7 @@ class OverlayPanel(QWidget):
             if not self.result.lines and y < self.height() - 12:
                 painter.drawText(14, y, "Keine legalen Züge / keine Engine-Variante.")
             if self.result.hanging and y + line_height < self.height() - 12:
-                painter.setPen(QColor(241, 196, 15))
+                painter.setPen(WARNING_TEXT)
                 text = metrics.elidedText(
                     "Hängend: " + ", ".join(self.result.hanging),
                     Qt.TextElideMode.ElideRight,
@@ -223,7 +232,7 @@ class OverlayPanel(QWidget):
                 )
                 painter.drawText(14, y + line_height, text)
 
-        painter.setPen(QColor(160, 172, 184))
+        painter.setPen(PENDING)
         font = QFont("Segoe UI", max(8, round(10 * scale)))
         painter.setFont(font)
         painter.drawText(self.width() - 24, self.height() - 10, "◢")

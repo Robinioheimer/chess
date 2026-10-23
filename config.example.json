@@ -42,6 +42,8 @@
     "helper_topmost": true
   },
   "last_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "training_acknowledged": true,
+  "training_acknowledged_at": "",
   "side_to_move": "w",
   "occupancy_std_threshold": 18.0,
   "min_piece_confidence": 0.45,

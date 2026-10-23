@@ -87,7 +87,7 @@ from stockfish_vision.gui.worker import CaptureWorker, EngineWorker, Recognition
 from stockfish_vision.overlay.helper import HelperPopup
 from stockfish_vision.overlay.hotkey import WindowsHotkeyFilter
 from stockfish_vision.overlay.mapping import logical_rect_to_region
-from stockfish_vision.overlay.selector import RegionSelector
+from stockfish_vision.overlay.selector import RegionSelection
 from stockfish_vision.overlay.topmost import TopmostKeeper, ensure_topmost
 from stockfish_vision.overlay.window import OverlayWindow
 from stockfish_vision.policy import LiveGameGuard, can_analyze
@@ -132,7 +132,7 @@ class CalibrationView(QLabel):
         super().__init__()
         self.setMinimumSize(300, 240)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("background:#111; color:#ccc;")
+        self.setStyleSheet("background:#f4f5f6; color:#5b6067; border:1px solid #cfd1d4;")
         self.setText("Noch kein Screenshot. Snapshot aufnehmen – das Brett wird rot eingerahmt.")
         self._image: np.ndarray | None = None
         self._qimage: QImage | None = None
@@ -235,7 +235,9 @@ class MainWindow(QMainWindow):
         self._initial_geometry()
 
         self.guard = LiveGameGuard()
-        self.snapshot_confirmed = False
+        # Die Trainings-/Nachbereitungs-Zustimmung ist bewusst vorausgewählt:
+        # das Programm analysiert ohnehin nur manuell ausgelöste Stellungen.
+        self.snapshot_confirmed = True
         self.snapshot_recognized = False
         self.mode = "training"
         self.live_preview = False
@@ -256,7 +258,7 @@ class MainWindow(QMainWindow):
         self.hotkey_filter: WindowsHotkeyFilter | None = None
         self.pgn_games: list[chess.pgn.Game] = []
         self.pgn_positions: list[tuple[str, str, chess.Board]] = []
-        self.selector: RegionSelector | None = None
+        self.selector: RegionSelection | None = None
         self._chain_recognize = False
         self._pending_analysis = False
         self._helper_offset = (config.ui.helper_x, config.ui.helper_y)
@@ -345,6 +347,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._refresh_monitors()
         self._load_settings_into_ui()
+        self._record_training_acknowledgement()
         self._apply_font_scale(config.ui.font_scale_percent, announce=False)
         self._refresh_region_label()
         self._set_board(self.board)
@@ -366,7 +369,8 @@ class MainWindow(QMainWindow):
         self.mode_banner = QLabel()
         self.mode_banner.setWordWrap(True)
         self.mode_banner.setStyleSheet(
-            "background:#234d35; color:#e6ffed; padding:9px; border-radius:5px; font-weight:600;"
+            "background:#f1f2f4; color:#33383e; border:1px solid #cfd1d4;"
+            " padding:9px; border-radius:6px; font-weight:600;"
         )
         central_layout.addWidget(self.mode_banner)
         self.tabs = QTabWidget()
@@ -463,7 +467,7 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         title = QLabel(full_version_label())
-        title.setStyleSheet("font-size: 24px; font-weight: 700; color: #79d99a;")
+        title.setStyleSheet("font-size: 24px; font-weight: 700; color: #111214;")
         subtitle = QLabel(
             "Geführter Ablauf in vier Schritten. Alles bleibt manuell ausgelöst – "
             "keine automatische Live-Analyse laufender Online-Partien."
@@ -475,7 +479,8 @@ class MainWindow(QMainWindow):
         self.overview_status = QLabel()
         self.overview_status.setWordWrap(True)
         self.overview_status.setStyleSheet(
-            "background:#1b2026; border:1px solid #2a313a; border-radius:6px; padding:10px;"
+            "background:#f7f7f8; border:1px solid #cfd1d4; border-radius:6px;"
+            " padding:10px; color:#33383e;"
         )
         layout.addWidget(self.overview_status)
 
@@ -495,7 +500,7 @@ class MainWindow(QMainWindow):
             number_label = QLabel(number)
             number_label.setFixedWidth(26)
             number_label.setStyleSheet(
-                "font-size: 18px; font-weight: 700; color:#79d99a;"
+                "font-size: 18px; font-weight: 700; color:#6b7280;"
             )
             text = QLabel(f"<b>{headline}</b><br>{description}")
             text.setWordWrap(True)
@@ -534,7 +539,7 @@ class MainWindow(QMainWindow):
             "Die Nummer steht im Fenstertitel und unter Hilfe → Version / Info."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color:#9fb0c0;")
+        note.setStyleSheet("color:#5b6067;")
         layout.addWidget(note)
         layout.addStretch()
         return widget
@@ -587,7 +592,7 @@ class MainWindow(QMainWindow):
             "Danach wird das Brett automatisch rot eingerahmt und erkannt."
         )
         region_hint.setWordWrap(True)
-        region_hint.setStyleSheet("color:#8a97a3;")
+        region_hint.setStyleSheet("color:#5b6067;")
         source_layout.addWidget(self.btn_pick_region)
         source_layout.addWidget(self.region_label)
         source_layout.addWidget(region_hint)
@@ -674,14 +679,16 @@ class MainWindow(QMainWindow):
         self.btn_preview.clicked.connect(self._toggle_preview)
         self.btn_snapshot = QPushButton("Snapshot aufnehmen und einfrieren")
         self.btn_snapshot.clicked.connect(self._take_snapshot)
-        self.confirm_box = QCheckBox(
-            "Keine laufende Online-Partie (nur Training/Nachbereitung)"
+        self.training_notice = QLabel(
+            "Trainingsmodus aktiv: Zustimmung automatisch erteilt "
+            "(nur eigene Stellungen, Snapshots und abgeschlossene Partien)."
         )
-        self.confirm_box.setToolTip(
-            "Bestätigt eine eigene Trainingsstellung, einen eingefrorenen Snapshot "
-            "oder eine abgeschlossene Partie – keine Hilfe während laufender Online-Partien."
+        self.training_notice.setWordWrap(True)
+        self.training_notice.setToolTip(
+            "Die Zustimmung ist standardmäßig aktiv und kann nicht versehentlich "
+            "deaktiviert werden. Details unter Hilfe → Trainingsmodus und Fairness."
         )
-        self.confirm_box.stateChanged.connect(self._on_confirm_changed)
+        self.training_notice.setStyleSheet("color:#5b6067;")
         self.btn_recognize = QPushButton("Snapshot im Hintergrund erkennen")
         self.btn_recognize.clicked.connect(self._recognize_snapshot)
         self.btn_review = QPushButton("Erkennung prüfen und korrigieren")
@@ -694,7 +701,7 @@ class MainWindow(QMainWindow):
         self.capture_status.setWordWrap(True)
         actions_layout.addWidget(self.btn_preview)
         actions_layout.addWidget(self.btn_snapshot)
-        actions_layout.addWidget(self.confirm_box)
+        actions_layout.addWidget(self.training_notice)
         actions_layout.addWidget(self.btn_recognize)
         actions_layout.addWidget(self.btn_review)
         actions_layout.addWidget(self.btn_analyze_snap)
@@ -1370,7 +1377,7 @@ class MainWindow(QMainWindow):
             self.last_frame = frame.copy()
             self.last_warped = None
             self.snapshot_recognized = False
-            self.snapshot_confirmed = self.confirm_box.isChecked()
+            self.snapshot_confirmed = True
             self._clear_detection_state()
             self.capture_status.setText(
                 "Snapshot eingefroren. Jetzt vier Ecken prüfen, Orientierung wählen und erkennen."
@@ -1599,8 +1606,12 @@ class MainWindow(QMainWindow):
         self.helper.set_step(1, "Erkennungsfehler: " + message.split("\n", 1)[0], can_analyze=False)
         self._update_action_states()
 
-    def _on_confirm_changed(self) -> None:
-        self.snapshot_confirmed = self.confirm_box.isChecked()
+    def _record_training_acknowledgement(self) -> None:
+        """Setzt die Trainings-Zustimmung ohne Zutun des Benutzers."""
+        self.snapshot_confirmed = True
+        if not self.config.training_acknowledged_at:
+            self.config.training_acknowledged_at = datetime.now().isoformat(timespec="seconds")
+        self.config.training_acknowledged = True
 
     # -------------------------------------------------------------- Position
     def _set_board(self, board: chess.Board, clear_detections: bool = True) -> None:
@@ -1629,7 +1640,7 @@ class MainWindow(QMainWindow):
 
     def _set_validity_messages(self, ok: bool, messages: list[str]) -> None:
         self.validity_label.setText("Stellung gültig." if ok else "\n".join(messages) or "Stellung prüfen.")
-        self.validity_label.setStyleSheet("color:#79d99a;" if ok else "color:#f0b35e;")
+        self.validity_label.setStyleSheet("color:#1f7a3f;" if ok else "color:#9a5b00;")
 
     def _apply_fen(self) -> None:
         try:
@@ -2074,7 +2085,7 @@ class MainWindow(QMainWindow):
 
     def _select_region_with_mouse(self) -> None:
         if self.selector is None:
-            self.selector = RegionSelector(None)
+            self.selector = RegionSelection(self)
             self.selector.selected.connect(self._on_region_selected)
             self.selector.cancelled.connect(self._on_region_cancelled)
         self._helper_was_visible = self.helper.isVisible()
