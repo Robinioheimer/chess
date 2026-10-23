@@ -84,7 +84,11 @@ from stockfish_vision.config import AppConfig, OverlaySettings, save_config
 from stockfish_vision.gui.board_widget import BoardWidget
 from stockfish_vision.gui.theme import build_stylesheet, clamp_font_scale
 from stockfish_vision.gui.worker import CaptureWorker, EngineWorker, RecognitionResult, RecognitionWorker
+from stockfish_vision.overlay.helper import HelperPopup
 from stockfish_vision.overlay.hotkey import WindowsHotkeyFilter
+from stockfish_vision.overlay.mapping import logical_rect_to_region
+from stockfish_vision.overlay.selector import RegionSelector
+from stockfish_vision.overlay.topmost import TopmostKeeper, ensure_topmost
 from stockfish_vision.overlay.window import OverlayWindow
 from stockfish_vision.policy import LiveGameGuard, can_analyze
 from stockfish_vision.recognition.pieces import Detection
@@ -252,6 +256,10 @@ class MainWindow(QMainWindow):
         self.hotkey_filter: WindowsHotkeyFilter | None = None
         self.pgn_games: list[chess.pgn.Game] = []
         self.pgn_positions: list[tuple[str, str, chess.Board]] = []
+        self.selector: RegionSelector | None = None
+        self._chain_recognize = False
+        self._pending_analysis = False
+        self._helper_offset = (config.ui.helper_x, config.ui.helper_y)
 
         try:
             self.board = parse_fen(config.last_fen)
@@ -268,6 +276,24 @@ class MainWindow(QMainWindow):
         self.overlay.set_status("Noch keine Analyse. Engine starten und Stellung analysieren.")
         if config.overlay.visible:
             self.overlay.present()
+
+        self.topmost = TopmostKeeper(parent=self)
+        self.helper = HelperPopup(version_label(), None)
+        self.helper.select_region_requested.connect(self._select_region_with_mouse)
+        self.helper.snapshot_requested.connect(self._helper_snapshot)
+        self.helper.analyze_requested.connect(self._helper_analyze)
+        self.helper.settings_requested.connect(self._helper_open_settings)
+        self.helper.overlay_test_requested.connect(self._test_overlay)
+        self.helper.position_changed.connect(self._helper_moved)
+        self.helper.hidden_by_user.connect(self._helper_hidden)
+        self._place_helper()
+        self.helper.setVisible(config.ui.helper_visible)
+        if config.ui.helper_visible:
+            self.helper.show_helper()
+        self.topmost.watch(self.helper)
+        self.topmost.watch(self.overlay)
+        self.topmost.watch(self.overlay.panel)
+        self.topmost.start()
 
         self.engine_thread = QThread(self)
         self.worker = EngineWorker()
@@ -318,6 +344,7 @@ class MainWindow(QMainWindow):
         self._refresh_monitors()
         self._load_settings_into_ui()
         self._apply_font_scale(config.ui.font_scale_percent, announce=False)
+        self._refresh_region_label()
         self._set_board(self.board)
         self._update_overlay_frame()
         hotkey_available = self._install_hotkey()
@@ -406,6 +433,18 @@ class MainWindow(QMainWindow):
         view_menu.addAction(smaller)
         view_menu.addAction(reset)
         view_menu.addSeparator()
+        helper_act = QAction("Einrichtungs-Popup anzeigen", self)
+        helper_act.setCheckable(True)
+        helper_act.setChecked(self.config.ui.helper_visible)
+        helper_act.setShortcut("Ctrl+Shift+H")
+        helper_act.toggled.connect(self._toggle_helper_from_menu)
+        self.helper_action = helper_act
+        view_menu.addAction(helper_act)
+        pick_act = QAction("Ausschnitt mit der Maus wählen", self)
+        pick_act.setShortcut("Ctrl+Shift+R")
+        pick_act.triggered.connect(self._select_region_with_mouse)
+        view_menu.addAction(pick_act)
+        view_menu.addSeparator()
         save_size = QAction("Aktuelle Fenstergröße übernehmen", self)
         save_size.triggered.connect(self._capture_window_size)
         view_menu.addAction(save_size)
@@ -443,8 +482,8 @@ class MainWindow(QMainWindow):
         entries = (
             ("1", "Bildschirmbereich wählen", "Monitor oder Bereich einstellen und einen Snapshot aufnehmen.",
              "Aufnahme öffnen", lambda: self.tabs.setCurrentWidget(self.capture_tab)),
-            ("2", "Brett einrahmen", "Automatisch rot einrahmen – oder mit vier Klicks bzw. einem aufgezogenen Rechteck selbst umrahmen.",
-             "Brett einrahmen", self._auto_frame_and_show),
+            ("2", "Brett einrahmen", "Bereich mit der Maus um das Spielfeld ziehen – das Brett wird automatisch rot eingerahmt und erkannt.",
+             "Ausschnitt wählen", self._select_region_with_mouse),
             ("3", "Erkennung prüfen", "Unsicheres Feld anklicken und die Figur manuell korrigieren.",
              "Prüfen öffnen", lambda: self.tabs.setCurrentWidget(self.training_tab)),
             ("4", "Analysieren", "Engine starten und die geprüfte Stellung analysieren; das Overlay zeigt Rahmen und Pfeile.",
@@ -468,6 +507,11 @@ class MainWindow(QMainWindow):
 
         quick = QGroupBox("Schnellzugriff")
         quick_layout = QHBoxLayout(quick)
+        popup_button = QPushButton("Popup einblenden")
+        popup_button.setToolTip("Kleines Helfer-Fenster, das durch die Einrichtung führt.")
+        popup_button.clicked.connect(self._show_helper)
+        pick_button = QPushButton("Ausschnitt mit der Maus wählen")
+        pick_button.clicked.connect(self._select_region_with_mouse)
         overlay_test = QPushButton("Overlay testen")
         overlay_test.setToolTip("Zeigt Rahmen, Demo-Pfeil und Panel ohne Engine-Analyse.")
         overlay_test.clicked.connect(self._test_overlay)
@@ -475,6 +519,8 @@ class MainWindow(QMainWindow):
         overlay_toggle.clicked.connect(self._toggle_overlay)
         settings_button = QPushButton("Größe und Einstellungen")
         settings_button.clicked.connect(lambda: self.tabs.setCurrentWidget(self.engine_tab))
+        quick_layout.addWidget(popup_button)
+        quick_layout.addWidget(pick_button)
         quick_layout.addWidget(overlay_test)
         quick_layout.addWidget(overlay_toggle)
         quick_layout.addWidget(settings_button)
@@ -511,6 +557,7 @@ class MainWindow(QMainWindow):
                     f"Engine {engine_state}",
                     f"Overlay {overlay_state}",
                     f"Roter Rahmen {frame} (auto {auto_frame})",
+                    f"Popup {'sichtbar' if self.helper.isVisible() else 'ausgeblendet'}",
                 )
             )
         )
@@ -523,12 +570,30 @@ class MainWindow(QMainWindow):
         left = QWidget()
         form = QVBoxLayout(left)
 
-        source = QGroupBox("1 · Bildschirmquelle")
+        source = QGroupBox("1 · Bildschirmausschnitt")
         source_layout = QVBoxLayout(source)
+        self.btn_pick_region = QPushButton("Bereich mit der Maus wählen")
+        self.btn_pick_region.setToolTip(
+            "Blendet den Bildschirm ab: Rahmen mit gedrückter Maustaste um das Spielfeld "
+            "ziehen. Esc bricht ab."
+        )
+        self.btn_pick_region.clicked.connect(self._select_region_with_mouse)
+        self.region_label = QLabel()
+        self.region_label.setWordWrap(True)
+        region_hint = QLabel(
+            "Der Bildschirm wird kurz abgedunkelt – Rahmen um das Spielfeld ziehen. "
+            "Danach wird das Brett automatisch rot eingerahmt und erkannt."
+        )
+        region_hint.setWordWrap(True)
+        region_hint.setStyleSheet("color:#8a97a3;")
+        source_layout.addWidget(self.btn_pick_region)
+        source_layout.addWidget(self.region_label)
+        source_layout.addWidget(region_hint)
+
         self.monitor_combo = QComboBox()
         refresh = QPushButton("Monitore aktualisieren")
         refresh.clicked.connect(self._refresh_monitors)
-        self.use_region = QCheckBox("Manuellen Bildschirmbereich verwenden")
+        self.use_region = QCheckBox("Gespeicherten Ausschnitt verwenden")
         self.region_left = QSpinBox()
         self.region_top = QSpinBox()
         self.region_width = QSpinBox()
@@ -550,11 +615,25 @@ class MainWindow(QMainWindow):
         ):
             region_row.addWidget(QLabel(label), index // 2, (index % 2) * 2)
             region_row.addWidget(spin, index // 2, (index % 2) * 2 + 1)
-        source_layout.addWidget(QLabel("Monitor"))
-        source_layout.addWidget(self.monitor_combo)
-        source_layout.addWidget(refresh)
-        source_layout.addWidget(self.use_region)
-        source_layout.addLayout(region_row)
+
+        self.advanced_group = QGroupBox("Erweitert: Monitor und Pixelwerte")
+        self.advanced_group.setCheckable(True)
+        self.advanced_group.setChecked(False)
+        advanced_body = QWidget()
+        advanced_layout = QVBoxLayout(advanced_body)
+        advanced_layout.setContentsMargins(0, 4, 0, 0)
+        advanced_layout.addWidget(QLabel("Monitor (ohne eigenen Ausschnitt)"))
+        advanced_layout.addWidget(self.monitor_combo)
+        advanced_layout.addWidget(refresh)
+        advanced_layout.addWidget(self.use_region)
+        advanced_layout.addLayout(region_row)
+        group_layout = QVBoxLayout(self.advanced_group)
+        group_layout.setContentsMargins(8, 4, 8, 8)
+        group_layout.addWidget(advanced_body)
+        self.advanced_body = advanced_body
+        advanced_body.setVisible(False)
+        self.advanced_group.toggled.connect(advanced_body.setVisible)
+        source_layout.addWidget(self.advanced_group)
         form.addWidget(source)
 
         calibration = QGroupBox("2 · Brett einrahmen")
@@ -637,13 +716,13 @@ class MainWindow(QMainWindow):
         self.calib_view.rect_selected.connect(self._set_rectangle_corners)
         right_layout.addWidget(self.calib_view)
 
-        left_scroll.setMinimumWidth(400)
+        left_scroll.setMinimumWidth(440)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         splitter.addWidget(left_scroll)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([430, 970])
+        splitter.setSizes([470, 930])
         layout.addWidget(splitter)
         return widget
 
@@ -1301,15 +1380,29 @@ class MainWindow(QMainWindow):
                 self.capture_status.setText(f"Kalibrierung prüfen: {exc}")
         else:
             self.capture_status.setText("Vorschau aktiv; keine automatische Engine-Aktualisierung.")
+        if purpose == "snapshot" and self._chain_recognize:
+            self._chain_recognize = False
+            if len(self.corners) == 4:
+                self.helper.set_step(1, "Brett erkannt. Figuren werden im Hintergrund erkannt …", busy=True)
+                self._recognize_snapshot()
+            else:
+                self.helper.set_step(
+                    0,
+                    "Brett nicht automatisch gefunden. Bitte den Ausschnitt enger um das "
+                    "Spielfeld ziehen oder in der App vier Ecken klicken.",
+                    can_analyze=False,
+                )
         self.calib_view.set_frame(self._annotate_corners(self.display_frame))
         self._update_overlay_frame()
         self._update_action_states()
 
     def _on_capture_error(self, message: str, purpose: str) -> None:
         self.capture_in_flight = False
+        self._chain_recognize = False
         if purpose == "preview" and self.live_preview:
             self._toggle_preview()
         self.capture_status.setText(f"Aufnahmefehler: {message}")
+        self.helper.set_step(0, f"Aufnahmefehler: {message.splitlines()[0]}")
         self._update_action_states()
 
     def _annotate_corners(self, frame: np.ndarray) -> np.ndarray:
@@ -1466,7 +1559,16 @@ class MainWindow(QMainWindow):
         self._set_validity_messages(ok and not low, messages)
         self.guard.record(result.board.board_fen())
         self.capture_status.setText(
-            "Erkennung abgeschlossen. Konfidenzen unter Training & Korrektur prüfen; keine Auto-Analyse."
+            "Erkennung abgeschlossen. Konfidenzen prüfen; keine Auto-Analyse."
+        )
+        unsure = len(low)
+        summary = f"{len(self.detections)} Felder geprüft"
+        if unsure:
+            summary += f", {unsure} unsicher"
+        self.helper.set_step(
+            1,
+            f"Erkennung fertig ({summary}). Jetzt analysieren oder in der App korrigieren.",
+            can_analyze=True,
         )
         self._update_action_states()
 
@@ -1475,7 +1577,7 @@ class MainWindow(QMainWindow):
         self.snapshot_recognized = False
         self.pending_warped = None
         self.capture_status.setText("Erkennungsfehler: " + message.split("\n", 1)[0])
-        QMessageBox.warning(self, "Erkennungsfehler", message.split("\n", 1)[0])
+        self.helper.set_step(1, "Erkennungsfehler: " + message.split("\n", 1)[0], can_analyze=False)
         self._update_action_states()
 
     def _on_confirm_changed(self) -> None:
@@ -1729,6 +1831,14 @@ class MainWindow(QMainWindow):
         if result.hanging:
             history_lines.append("Hängende Figuren: " + ", ".join(result.hanging))
         self.history_view.append("\n".join(history_lines) + "\n")
+        if result.lines:
+            self.helper.set_step(
+                2,
+                f"Analyse fertig: {result.lines[0].score_text} · {result.lines[0].best_move_san}",
+                can_analyze=True,
+            )
+        else:
+            self.helper.set_step(2, "Analyse fertig, aber keine Zugfolge erhalten.", can_analyze=True)
         current = result.fen == self.board.fen()
         if current:
             self.board_widget.set_analysis(result.lines)
@@ -1759,6 +1869,8 @@ class MainWindow(QMainWindow):
         self._update_engine_hint()
         logger.error(message)
         self.engine_status.setText("Engine-Fehler: " + message.split("\n", 1)[0])
+        self._pending_analysis = False
+        self.helper.set_step(2, "Engine-Fehler: " + message.split("\n", 1)[0])
         QMessageBox.warning(self, "Engine-Fehler", message.split("\n", 1)[0])
         self.statusBar().showMessage("Engine-Fehler; bitte Pfad/Einstellungen prüfen und Engine neu starten.")
         self._update_action_states()
@@ -1781,12 +1893,21 @@ class MainWindow(QMainWindow):
         self.engine_status.setText(f"Engine bereit: {name}")
         self.statusBar().showMessage(f"Engine bereit: {name}")
         self._update_action_states()
+        if self._pending_analysis:
+            self._pending_analysis = False
+            if self.snapshot_recognized:
+                self._helper_analyze()
+            else:
+                self.helper.set_step(
+                    1, "Engine bereit. Bitte Snapshot + erkennen ausführen.", can_analyze=False
+                )
 
     def _on_engine_stopped(self) -> None:
         self.engine_ready = False
         self.engine_start_in_flight = False
         self._update_engine_hint()
         self.engine_status.setText("Engine gestoppt.")
+        self.helper.set_step(2, "Engine gestoppt. Für die Analyse erneut starten.", can_analyze=True)
         self.statusBar().showMessage("Engine gestoppt")
         self._update_action_states()
 
@@ -1818,6 +1939,184 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.model_path_edit.setText(path)
+
+    # ------------------------------------------------------- Einrichtungs-Popup
+    def _place_helper(self) -> None:
+        x, y = self._helper_offset
+        self.helper.adjustSize()
+        if x is None or y is None or x < 0 or y < 0:
+            self.helper.place_default()
+        else:
+            self.helper.move(int(x), int(y))
+
+    def _helper_moved(self, x: int, y: int) -> None:
+        self._helper_offset = (int(x), int(y))
+        self.config.ui.helper_x = int(x)
+        self.config.ui.helper_y = int(y)
+
+    def _helper_hidden(self) -> None:
+        self.config.ui.helper_visible = False
+        if hasattr(self, "helper_action"):
+            self.helper_action.blockSignals(True)
+            self.helper_action.setChecked(False)
+            self.helper_action.blockSignals(False)
+        self.statusBar().showMessage(
+            "Einrichtungs-Popup ausgeblendet. Start-Tab → Popup einblenden holt es zurück."
+        )
+        self._refresh_overview()
+
+    def _show_helper(self) -> None:
+        self.config.ui.helper_visible = True
+        self._place_helper()
+        self.helper.show_helper()
+        ensure_topmost(self.helper)
+        if hasattr(self, "helper_action"):
+            self.helper_action.blockSignals(True)
+            self.helper_action.setChecked(True)
+            self.helper_action.blockSignals(False)
+        self._refresh_overview()
+
+    def _toggle_helper_from_menu(self, checked: bool) -> None:
+        if checked and not self.helper.isVisible():
+            self._show_helper()
+        elif not checked and self.helper.isVisible():
+            self.helper.hide()
+            self.config.ui.helper_visible = False
+            self._refresh_overview()
+
+    def _toggle_helper(self) -> None:
+        if self.helper.isVisible():
+            self.helper.hide()
+            self.config.ui.helper_visible = False
+        else:
+            self._show_helper()
+        self._refresh_overview()
+
+    def _helper_snapshot(self) -> None:
+        self._chain_recognize = True
+        self.helper.set_step(1, "Snapshot wird aufgenommen …", busy=True, can_analyze=False)
+        self._take_snapshot()
+
+    def _helper_open_settings(self) -> None:
+        self.tabs.setCurrentWidget(self.engine_tab)
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _helper_analyze(self) -> None:
+        if not self.snapshot_recognized or self.last_warped is None:
+            self.helper.set_step(
+                1,
+                "Bitte zuerst Snapshot + erkennen ausführen, danach analysieren.",
+                can_analyze=False,
+            )
+            return
+        if not self.engine_ready:
+            self._pending_analysis = True
+            self.helper.set_step(2, "Engine wird gestartet …", busy=True, can_analyze=False)
+            self._start_engine()
+            return
+        self.helper.set_step(2, "Engine analysiert die Stellung …", busy=True, can_analyze=False)
+        self._analyze_snapshot()
+
+    # ------------------------------------------------------- Ausschnitt per Maus
+    @staticmethod
+    def _screen_rects() -> list[tuple[float, float, float, float, float]]:
+        rects: list[tuple[float, float, float, float, float]] = []
+        for screen in QGuiApplication.screens():
+            geometry = screen.geometry()
+            rects.append(
+                (
+                    float(geometry.x()),
+                    float(geometry.y()),
+                    float(geometry.width()),
+                    float(geometry.height()),
+                    float(screen.devicePixelRatio()) or 1.0,
+                )
+            )
+        return rects
+
+    def _select_region_with_mouse(self) -> None:
+        if self.selector is None:
+            self.selector = RegionSelector(None)
+            self.selector.selected.connect(self._on_region_selected)
+            self.selector.cancelled.connect(self._on_region_cancelled)
+        self._helper_was_visible = self.helper.isVisible()
+        if self._helper_was_visible:
+            self.helper.hide()
+        self.selector.start()
+        self.statusBar().showMessage(
+            "Ausschnitt wählen: Rahmen mit der Maus um das Spielfeld ziehen (Esc bricht ab)."
+        )
+
+    def _on_region_cancelled(self) -> None:
+        if getattr(self, "_helper_was_visible", False):
+            self._show_helper()
+        self.helper.set_step(
+            self.helper.step, "Auswahl abgebrochen. Es wurde nichts geändert."
+        )
+        self.statusBar().showMessage("Auswahl abgebrochen.")
+
+    def _on_region_selected(self, rect: QRect) -> None:
+        region = logical_rect_to_region(
+            (rect.x(), rect.y(), rect.width(), rect.height()), self._screen_rects()
+        )
+        if getattr(self, "_helper_was_visible", False):
+            self._show_helper()
+        if region is None:
+            self.helper.set_step(
+                0,
+                "Der Rahmen war zu klein. Bitte erneut einen Bereich um das Spielfeld ziehen.",
+                can_analyze=False,
+            )
+            return
+        self.config.capture.region = dict(region)
+        self.use_region.blockSignals(True)
+        self.use_region.setChecked(True)
+        self.use_region.blockSignals(False)
+        for widget, value in (
+            (self.region_left, region["left"]),
+            (self.region_top, region["top"]),
+            (self.region_width, region["width"]),
+            (self.region_height, region["height"]),
+        ):
+            widget.blockSignals(True)
+            widget.setValue(int(value))
+            widget.blockSignals(False)
+        self.corners = []
+        self.preview_warped = None
+        self.snapshot_recognized = False
+        self.config.capture.corners = None
+        self.capture_origin = (float(region["left"]), float(region["top"]))
+        self.overlay.update_frame(None, self.capture_origin)
+        self._refresh_region_label()
+        self.capture_status.setText(
+            "Ausschnitt gespeichert. Snapshot wird aufgenommen und das Brett erkannt."
+        )
+        self._refresh_overview()
+        self.helper.set_step(
+            1,
+            "Ausschnitt gespeichert. Snapshot wird aufgenommen und das Brett erkannt …",
+            busy=True,
+            can_analyze=False,
+        )
+        self._chain_recognize = True
+        self._take_snapshot()
+
+    def _refresh_region_label(self) -> None:
+        if not hasattr(self, "region_label"):
+            return
+        region = self.config.capture.region
+        if not region:
+            self.region_label.setText(
+                "Kein eigener Ausschnitt – es wird der gewählte Monitor komplett aufgenommen."
+            )
+            return
+        self.region_label.setText(
+            f"Ausschnitt: {region['width']} × {region['height']} px "
+            f"ab {region['left']} / {region['top']} (physische Pixel)"
+        )
 
     # ---------------------------------------------------------------- Overlay
     def _opacity_changed(self, value: int) -> None:
@@ -1889,6 +2188,8 @@ class MainWindow(QMainWindow):
         self.overlay.apply_settings(self.config.overlay)
         self._update_overlay_frame()
         self.overlay.show_test()
+        ensure_topmost(self.overlay)
+        ensure_topmost(self.helper)
         self._refresh_overview()
         message = (
             "Overlay-Test aktiv. "
@@ -2145,5 +2446,10 @@ class MainWindow(QMainWindow):
                 logger.warning("Hintergrund-Thread beendet nicht rechtzeitig; er wird abgebrochen.")
                 thread.terminate()
                 thread.wait(1000)
+        self.topmost.stop()
+        if self.selector is not None:
+            self.selector.close()
+            self.selector = None
+        self.helper.close()
         self.overlay.close()
         event.accept()

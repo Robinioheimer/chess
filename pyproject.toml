@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stockfish-vision-chess-ai"
-version = "2.0.0"
+version = "4.0.0"
 description = "Bildschirm-Schachbrett-Erkennung und Stockfish-Analyse für Trainingsstellungen und abgeschlossene Partien."
 readme = "README.md"
 requires-python = ">=3.11"

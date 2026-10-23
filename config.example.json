@@ -34,7 +34,11 @@
     "window_width": 1380,
     "window_height": 900,
     "font_scale_percent": 100,
-    "start_maximized": false
+    "start_maximized": false,
+    "helper_visible": true,
+    "helper_x": -1,
+    "helper_y": -1,
+    "helper_topmost": true
   },
   "last_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   "side_to_move": "w",

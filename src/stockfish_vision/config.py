@@ -58,6 +58,10 @@ class UiSettings:
     window_height: int = 900
     font_scale_percent: int = 100
     start_maximized: bool = False
+    helper_visible: bool = True
+    helper_x: int = -1
+    helper_y: int = -1
+    helper_topmost: bool = True
 
 
 @dataclass
@@ -141,6 +145,10 @@ class AppConfig:
         self.ui.window_height = _bounded_int(self.ui.window_height, 520, 4000, 900)
         self.ui.font_scale_percent = _bounded_int(self.ui.font_scale_percent, 70, 200, 100)
         self.ui.start_maximized = bool(self.ui.start_maximized)
+        self.ui.helper_visible = bool(self.ui.helper_visible)
+        self.ui.helper_x = _bounded_int(self.ui.helper_x, -20_000, 20_000, -1)
+        self.ui.helper_y = _bounded_int(self.ui.helper_y, -20_000, 20_000, -1)
+        self.ui.helper_topmost = bool(self.ui.helper_topmost)
 
         self.occupancy_std_threshold = _bounded_float(
             self.occupancy_std_threshold, 1.0, 100.0, 18.0
