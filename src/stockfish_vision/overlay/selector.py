@@ -12,11 +12,43 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from stockfish_vision.overlay.topmost import ensure_topmost
+
 logger = logging.getLogger(__name__)
 
 PANEL_BG = QColor(16, 19, 23, 235)
 ACCENT = QColor(255, 45, 45)
 MIN_SIZE = 24
+EDGE_MARGIN = 2
+
+
+def desktop_geometry(screens: list[QRect]) -> QRect:
+    """Vereinigung aller Bildschirme (logische Pixel).
+
+    Mehrere Monitore, negative Koordinaten und unterschiedliche DPI-Faktoren
+    werden berücksichtigt. Ein leeres Ergebnis bedeutet „keine Bildschirme“.
+    """
+
+    union = QRect()
+    for rect in screens:
+        if rect.isValid() and not rect.isNull():
+            union = rect if union.isNull() else union.united(rect)
+    return union
+
+
+def full_screen_geometry() -> QRect:
+    """Geometrie, die den gesamten Desktop abdeckt."""
+
+    screens = [screen.geometry() for screen in QGuiApplication.screens()]
+    geometry = desktop_geometry(screens)
+    if geometry.isNull() or not geometry.isValid():
+        primary = QGuiApplication.primaryScreen()
+        if primary is not None:
+            geometry = primary.geometry()
+    if not geometry.isNull() and geometry.isValid():
+        # Ein Pixel Rand, damit die Kante unter dem Mauszeiger erreichbar bleibt.
+        geometry = geometry.adjusted(-EDGE_MARGIN, -EDGE_MARGIN, EDGE_MARGIN, EDGE_MARGIN)
+    return geometry
 
 
 class RegionSelector(QWidget):
@@ -44,22 +76,40 @@ class RegionSelector(QWidget):
 
     # ------------------------------------------------------------- Steuerung
     def start(self) -> None:
-        geometry = QRect()
-        for screen in QGuiApplication.screens():
-            geometry = geometry.united(screen.geometry())
-        if not geometry.isValid() or geometry.isNull():
-            screen = QGuiApplication.primaryScreen()
-            if screen is not None:
-                geometry = screen.geometry()
+        geometry = full_screen_geometry()
         self._origin = None
         self._current = None
         self._finished = False
-        if geometry.isValid() and not geometry.isNull():
+        logger.info(
+            "Auswahl-Ebene: %s×%s bei %s/%s (%s Bildschirm(e))",
+            geometry.width(),
+            geometry.height(),
+            geometry.x(),
+            geometry.y(),
+            len(QGuiApplication.screens()),
+        )
+        if not geometry.isNull() and geometry.isValid():
+            # Mindestgröße verhindert, dass Qt das Fenster auf die Primärseite
+            # oder auf die Größenanforderung zusammenstutzt.
+            self.setMinimumSize(geometry.size())
             self.setGeometry(geometry)
         self.show()
         self.raise_()
         self.activateWindow()
         self.setFocus(Qt.FocusReason.OtherFocusReason)
+        if not geometry.isNull() and geometry.isValid():
+            # Zweiter Durchlauf: manche Plattformen korrigieren die Geometrie
+            # erst nach dem ersten Frame.
+            self.setGeometry(geometry)
+        ensure_topmost(self)
+        self.update()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        geometry = full_screen_geometry()
+        if not geometry.isNull() and geometry.isValid() and self.geometry() != geometry:
+            self.setMinimumSize(geometry.size())
+            self.setGeometry(geometry)
 
     def selection(self) -> QRect:
         if self._origin is None or self._current is None:
@@ -156,30 +206,32 @@ class RegionSelector(QWidget):
         self._draw_prompt(painter, full)
 
     def _draw_prompt(self, painter: QPainter, full: QRect) -> None:
-        font = QFont("Segoe UI", 12, QFont.Weight.DemiBold)
-        small = QFont("Segoe UI", 9)
+        scale = max(1.0, min(2.0, full.height() / 1080.0))
+        font = QFont("Segoe UI", max(12, round(12 * scale)), QFont.Weight.DemiBold)
+        small = QFont("Segoe UI", max(9, round(9 * scale)))
         title_width = painter.fontMetrics().horizontalAdvance(self.prompt)
         painter.setFont(font)
         title_width = painter.fontMetrics().horizontalAdvance(self.prompt)
         painter.setFont(small)
         hint_width = painter.fontMetrics().horizontalAdvance(self.hint)
-        box_width = max(title_width, hint_width) + 48
-        box = QRect(0, 0, box_width, 74)
-        box.moveCenter(QPoint(full.center().x(), full.bottom() - 70))
+        box_width = max(title_width, hint_width) + round(48 * scale)
+        box_height = round(74 * scale)
+        box = QRect(0, 0, box_width, box_height)
+        box.moveCenter(QPoint(full.center().x(), full.bottom() - round(70 * scale)))
         painter.setBrush(PANEL_BG)
         painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
         painter.drawRoundedRect(box, 10, 10)
         painter.setFont(font)
         painter.setPen(QColor(240, 245, 250))
         painter.drawText(
-            QRect(box.left(), box.top() + 10, box.width(), 26),
+            QRect(box.left(), box.top() + round(10 * scale), box.width(), round(26 * scale)),
             Qt.AlignmentFlag.AlignCenter,
             self.prompt,
         )
         painter.setFont(small)
         painter.setPen(QColor(160, 172, 184))
         painter.drawText(
-            QRect(box.left(), box.top() + 40, box.width(), 22),
+            QRect(box.left(), box.top() + round(40 * scale), box.width(), round(22 * scale)),
             Qt.AlignmentFlag.AlignCenter,
             self.hint,
         )

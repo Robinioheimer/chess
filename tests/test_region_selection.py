@@ -43,3 +43,27 @@ def test_region_roundtrip_is_stable() -> None:
 
 def test_region_to_logical_rect_rejects_broken_data() -> None:
     assert region_to_logical_rect({"left": 1}, []) is None
+
+
+def test_desktop_geometry_covers_multiple_screens_with_negative_coordinates() -> None:
+    from PySide6.QtCore import QRect
+
+    from stockfish_vision.overlay.selector import desktop_geometry
+
+    single = desktop_geometry([QRect(0, 0, 1920, 1080)])
+    assert single == QRect(0, 0, 1920, 1080)
+    dual = desktop_geometry([QRect(0, 0, 1920, 1080), QRect(-1920, 0, 1920, 1080)])
+    assert dual == QRect(-1920, 0, 3840, 1080)
+    stacked = desktop_geometry([QRect(0, 0, 1920, 1080), QRect(0, -1200, 1920, 1200)])
+    assert stacked == QRect(0, -1200, 1920, 2280)
+
+
+def test_desktop_geometry_ignores_invalid_screens() -> None:
+    from PySide6.QtCore import QRect
+
+    from stockfish_vision.overlay.selector import desktop_geometry
+
+    assert desktop_geometry([]) == QRect()
+    assert desktop_geometry([QRect()]) == QRect()
+    result = desktop_geometry([QRect(), QRect(100, 100, 800, 600)])
+    assert result == QRect(100, 100, 800, 600)
