@@ -8,15 +8,31 @@ from pathlib import Path
 import chess
 import cv2
 import numpy as np
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QBrush, QCloseEvent, QColor, QGuiApplication, QImage, QPixmap
+from PySide6.QtCore import QRect, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import (
+    QAction,
+    QBrush,
+    QCloseEvent,
+    QColor,
+    QGuiApplication,
+    QImage,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,6 +41,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -38,7 +55,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from stockfish_vision.board.geometry import board_mean_abs_diff, extract_square, square_to_image_rc, warp_board
+from stockfish_vision.board.detect import detect_board_corners, rectangle_to_corners
+from stockfish_vision.board.geometry import (
+    board_mean_abs_diff,
+    extract_square,
+    square_to_image_rc,
+    validate_corners,
+    warp_board,
+)
 from stockfish_vision.capture.screen import list_monitors
 from stockfish_vision.chesslogic.fenutil import (
     apply_manual_piece,
@@ -58,11 +82,18 @@ from stockfish_vision.chesslogic.pgnutil import (
 )
 from stockfish_vision.config import AppConfig, OverlaySettings, save_config
 from stockfish_vision.gui.board_widget import BoardWidget
+from stockfish_vision.gui.theme import build_stylesheet, clamp_font_scale
 from stockfish_vision.gui.worker import CaptureWorker, EngineWorker, RecognitionResult, RecognitionWorker
 from stockfish_vision.overlay.hotkey import WindowsHotkeyFilter
 from stockfish_vision.overlay.window import OverlayWindow
 from stockfish_vision.policy import LiveGameGuard, can_analyze
 from stockfish_vision.recognition.pieces import Detection
+from stockfish_vision.version import (
+    VERSION_HISTORY,
+    full_version_label,
+    version_label,
+    window_title,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +115,26 @@ PIECE_CHOICES = [
 
 
 class CalibrationView(QLabel):
+    """Vorschaubild der Aufnahme.
+
+    Ein einzelner Klick setzt eine Brettecke; mit gedrückter Maustaste lässt
+    sich alternativ direkt ein Rechteck um das Brett aufziehen.
+    """
+
     corner_clicked = Signal(float, float)
+    rect_selected = Signal(float, float, float, float)
 
     def __init__(self) -> None:
         super().__init__()
-        self.setMinimumSize(480, 320)
+        self.setMinimumSize(300, 240)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background:#111; color:#ccc;")
-        self.setText("Noch kein Screenshot.")
+        self.setText("Noch kein Screenshot. Snapshot aufnehmen – das Brett wird rot eingerahmt.")
         self._image: np.ndarray | None = None
         self._qimage: QImage | None = None
+        self._press_position: tuple[float, float] | None = None
+        self._rubber_start = None
+        self._rubber_current = None
 
     def set_frame(self, bgr: np.ndarray) -> None:
         self._image = bgr
@@ -118,26 +159,76 @@ class CalibrationView(QLabel):
         super().resizeEvent(event)
         self._update_pixmap()
 
-    def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        if event.button() != Qt.MouseButton.LeftButton or self._image is None or self.pixmap() is None:
-            return
+    def _to_image(self, position) -> tuple[float, float] | None:
+        if self._image is None or self.pixmap() is None:
+            return None
         pixmap = self.pixmap()
         pw, ph = pixmap.width(), pixmap.height()
         x0 = (self.width() - pw) // 2
         y0 = (self.height() - ph) // 2
-        mx, my = int(event.position().x()), int(event.position().y())
+        mx, my = float(position.x()), float(position.y())
         if not (x0 <= mx < x0 + pw and y0 <= my < y0 + ph):
-            return
+            return None
         height, width = self._image.shape[:2]
-        self.corner_clicked.emit((mx - x0) / pw * width, (my - y0) / ph * height)
+        return (mx - x0) / pw * width, (my - y0) / ph * height
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        point = self._to_image(event.position())
+        if point is None:
+            return
+        self._press_position = point
+        self._rubber_start = event.position()
+        self._rubber_current = event.position()
+        self.update()
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._rubber_start is None:
+            return
+        self._rubber_current = event.position()
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if self._press_position is None:
+            return
+        start_image = self._press_position
+        end_image = self._to_image(event.position())
+        start_widget = self._rubber_start
+        end_widget = self._rubber_current
+        self._press_position = None
+        self._rubber_start = None
+        self._rubber_current = None
+        self.update()
+        if end_image is None or start_widget is None or end_widget is None:
+            return
+        dragged = (
+            abs(end_widget.x() - start_widget.x()) > 12
+            or abs(end_widget.y() - start_widget.y()) > 12
+        )
+        if dragged:
+            self.rect_selected.emit(start_image[0], start_image[1], end_image[0], end_image[1])
+        else:
+            self.corner_clicked.emit(start_image[0], start_image[1])
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        super().paintEvent(event)
+        if self._rubber_start is None or self._rubber_current is None:
+            return
+        painter = QPainter(self)
+        pen = QPen(QColor(255, 45, 45), 2, Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(QColor(255, 45, 45, 40))
+        painter.drawRect(QRectF(self._rubber_start, self._rubber_current).normalized())
 
 
 class MainWindow(QMainWindow):
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self.config = config
-        self.setWindowTitle("Stockfish Vision Chess AI – Trainingsmodus")
-        self.resize(1380, 900)
+        self.setWindowTitle(window_title())
+        self._ui_geometry_applied = False
+        self._initial_geometry()
 
         self.guard = LiveGameGuard()
         self.snapshot_confirmed = False
@@ -173,9 +264,10 @@ class MainWindow(QMainWindow):
         self.overlay.panel_settings_changed.connect(self._overlay_panel_changed)
         self.overlay.cover_virtual_desktop()
         self.overlay.user_hidden = not config.overlay.visible
-        if config.overlay.visible:
-            self.overlay.show()
         self.overlay.set_click_through(True)
+        self.overlay.set_status("Noch keine Analyse. Engine starten und Stellung analysieren.")
+        if config.overlay.visible:
+            self.overlay.present()
 
         self.engine_thread = QThread(self)
         self.worker = EngineWorker()
@@ -225,7 +317,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._refresh_monitors()
         self._load_settings_into_ui()
+        self._apply_font_scale(config.ui.font_scale_percent, announce=False)
         self._set_board(self.board)
+        self._update_overlay_frame()
         hotkey_available = self._install_hotkey()
         self._update_mode_banner()
         self._update_action_states()
@@ -247,17 +341,19 @@ class MainWindow(QMainWindow):
         )
         central_layout.addWidget(self.mode_banner)
         self.tabs = QTabWidget()
+        self.overview_tab = self._overview_tab()
         self.capture_tab = self._capture_tab()
         self.training_tab = self._training_tab()
         self.analysis_tab = self._analysis_tab()
-        self.engine_tab = self._engine_tab()
+        self.engine_tab = self._settings_tab()
         self.pgn_tab = self._pgn_tab()
-        self.tabs.addTab(self.capture_tab, "Aufnahme")
-        self.tabs.addTab(self.training_tab, "Training & Korrektur")
-        self.tabs.addTab(self.analysis_tab, "Analyse")
-        self.tabs.addTab(self.engine_tab, "Engine & Overlay")
-        self.tabs.addTab(self.pgn_tab, "PGN")
-        self.tabs.addTab(self._history_tab(), "Historie")
+        self.tabs.addTab(self.overview_tab, "Start")
+        self.tabs.addTab(self.capture_tab, "1 · Aufnahme")
+        self.tabs.addTab(self.training_tab, "2 · Prüfen")
+        self.tabs.addTab(self.analysis_tab, "3 · Analyse")
+        self.tabs.addTab(self.engine_tab, "4 · Einstellungen")
+        self.tabs.addTab(self.pgn_tab, "5 · PGN")
+        self.tabs.addTab(self._history_tab(), "6 · Historie")
         central_layout.addWidget(self.tabs)
         self.setCentralWidget(central)
 
@@ -279,17 +375,159 @@ class MainWindow(QMainWindow):
         quit_act.triggered.connect(self.close)
         file_menu.addAction(quit_act)
 
+        view_menu = self.menuBar().addMenu("Ansicht")
+        for label, width, height in (
+            ("Klein (1100 × 760)", 1100, 760),
+            ("Mittel (1380 × 900)", 1380, 900),
+            ("Groß (1680 × 1050)", 1680, 1050),
+        ):
+            action = QAction(label, self)
+            action.triggered.connect(
+                lambda _checked=False, w=width, h=height: self._apply_size_preset(w, h)
+            )
+            view_menu.addAction(action)
+        max_act = QAction("Maximiert starten", self)
+        max_act.setCheckable(True)
+        max_act.setChecked(self.config.ui.start_maximized)
+        max_act.toggled.connect(self._set_start_maximized)
+        self.maximized_action = max_act
+        view_menu.addAction(max_act)
+        view_menu.addSeparator()
+        bigger = QAction("Schrift größer", self)
+        bigger.setShortcut("Ctrl+=")
+        bigger.triggered.connect(lambda: self._adjust_font_scale(10))
+        smaller = QAction("Schrift kleiner", self)
+        smaller.setShortcut("Ctrl+-")
+        smaller.triggered.connect(lambda: self._adjust_font_scale(-10))
+        reset = QAction("Schrift Standard", self)
+        reset.setShortcut("Ctrl+0")
+        reset.triggered.connect(lambda: self._apply_font_scale(100))
+        view_menu.addAction(bigger)
+        view_menu.addAction(smaller)
+        view_menu.addAction(reset)
+        view_menu.addSeparator()
+        save_size = QAction("Aktuelle Fenstergröße übernehmen", self)
+        save_size.triggered.connect(self._capture_window_size)
+        view_menu.addAction(save_size)
+
         help_menu = self.menuBar().addMenu("Hilfe")
         fairness_act = QAction("Trainingsmodus und Fairness", self)
         fairness_act.triggered.connect(self._show_fairness)
         help_menu.addAction(fairness_act)
+        version_act = QAction(f"Version / Info ({version_label()})", self)
+        version_act.triggered.connect(self._show_version_info)
+        help_menu.addAction(version_act)
+
+    def _overview_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        title = QLabel(full_version_label())
+        title.setStyleSheet("font-size: 24px; font-weight: 700; color: #79d99a;")
+        subtitle = QLabel(
+            "Geführter Ablauf in vier Schritten. Alles bleibt manuell ausgelöst – "
+            "keine automatische Live-Analyse laufender Online-Partien."
+        )
+        subtitle.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        self.overview_status = QLabel()
+        self.overview_status.setWordWrap(True)
+        self.overview_status.setStyleSheet(
+            "background:#1b2026; border:1px solid #2a313a; border-radius:6px; padding:10px;"
+        )
+        layout.addWidget(self.overview_status)
+
+        steps = QGroupBox("So funktioniert es")
+        steps_layout = QGridLayout(steps)
+        entries = (
+            ("1", "Bildschirmbereich wählen", "Monitor oder Bereich einstellen und einen Snapshot aufnehmen.",
+             "Aufnahme öffnen", lambda: self.tabs.setCurrentWidget(self.capture_tab)),
+            ("2", "Brett einrahmen", "Automatisch rot einrahmen – oder mit vier Klicks bzw. einem aufgezogenen Rechteck selbst umrahmen.",
+             "Brett einrahmen", self._auto_frame_and_show),
+            ("3", "Erkennung prüfen", "Unsicheres Feld anklicken und die Figur manuell korrigieren.",
+             "Prüfen öffnen", lambda: self.tabs.setCurrentWidget(self.training_tab)),
+            ("4", "Analysieren", "Engine starten und die geprüfte Stellung analysieren; das Overlay zeigt Rahmen und Pfeile.",
+             "Engine und Analyse", lambda: self.tabs.setCurrentWidget(self.analysis_tab)),
+        )
+        for row, (number, headline, description, button_text, callback) in enumerate(entries):
+            number_label = QLabel(number)
+            number_label.setFixedWidth(26)
+            number_label.setStyleSheet(
+                "font-size: 18px; font-weight: 700; color:#79d99a;"
+            )
+            text = QLabel(f"<b>{headline}</b><br>{description}")
+            text.setWordWrap(True)
+            button = QPushButton(button_text)
+            button.clicked.connect(callback)
+            steps_layout.addWidget(number_label, row, 0, Qt.AlignmentFlag.AlignTop)
+            steps_layout.addWidget(text, row, 1)
+            steps_layout.addWidget(button, row, 2)
+        steps_layout.setColumnStretch(1, 1)
+        layout.addWidget(steps)
+
+        quick = QGroupBox("Schnellzugriff")
+        quick_layout = QHBoxLayout(quick)
+        overlay_test = QPushButton("Overlay testen")
+        overlay_test.setToolTip("Zeigt Rahmen, Demo-Pfeil und Panel ohne Engine-Analyse.")
+        overlay_test.clicked.connect(self._test_overlay)
+        overlay_toggle = QPushButton("Overlay ein/aus")
+        overlay_toggle.clicked.connect(self._toggle_overlay)
+        settings_button = QPushButton("Größe und Einstellungen")
+        settings_button.clicked.connect(lambda: self.tabs.setCurrentWidget(self.engine_tab))
+        quick_layout.addWidget(overlay_test)
+        quick_layout.addWidget(overlay_toggle)
+        quick_layout.addWidget(settings_button)
+        quick_layout.addStretch()
+        layout.addWidget(quick)
+
+        note = QLabel(
+            f"Version {version_label()} · Neue Fassungen heißen v1, v2, v3 … "
+            "Die Nummer steht im Fenstertitel und unter Hilfe → Version / Info."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#9fb0c0;")
+        layout.addWidget(note)
+        layout.addStretch()
+        return widget
+
+    def _refresh_overview(self) -> None:
+        if not hasattr(self, "overview_status"):
+            return
+        overlay_state = "aus" if self.overlay.user_hidden else "an"
+        engine_state = "bereit" if self.engine_ready else "nicht gestartet"
+        corners = f"{len(self.corners)}/4 Ecken"
+        snapshot = "vorhanden" if self.last_frame is not None else "keins"
+        frame = "an" if self.config.overlay.show_frame else "aus"
+        auto_frame = "an" if self.config.capture.auto_frame else "aus"
+        self.overview_status.setText(
+            "   ·   ".join(
+                (
+                    f"Fenster {self.width()}×{self.height()}",
+                    f"Schrift {self.config.ui.font_scale_percent} %",
+                    f"Monitor {self.config.capture.monitor_index}",
+                    f"Kalibrierung {corners}",
+                    f"Snapshot {snapshot}",
+                    f"Engine {engine_state}",
+                    f"Overlay {overlay_state}",
+                    f"Roter Rahmen {frame} (auto {auto_frame})",
+                )
+            )
+        )
 
     def _capture_tab(self) -> QWidget:
         widget = QWidget()
         layout = QHBoxLayout(widget)
         splitter = QSplitter()
+
         left = QWidget()
         form = QVBoxLayout(left)
+
+        source = QGroupBox("1 · Bildschirmquelle")
+        source_layout = QVBoxLayout(source)
+        self.monitor_combo = QComboBox()
+        refresh = QPushButton("Monitore aktualisieren")
+        refresh.clicked.connect(self._refresh_monitors)
         self.use_region = QCheckBox("Manuellen Bildschirmbereich verwenden")
         self.region_left = QSpinBox()
         self.region_top = QSpinBox()
@@ -301,83 +539,126 @@ class MainWindow(QMainWindow):
             spin.setRange(16, 16_384)
         self.region_width.setValue(800)
         self.region_height.setValue(800)
-        region_row = QHBoxLayout()
-        for label, spin in (
-            ("L", self.region_left),
-            ("T", self.region_top),
-            ("B", self.region_width),
-            ("H", self.region_height),
+        region_row = QGridLayout()
+        for index, (label, spin) in enumerate(
+            (
+                ("Links (L)", self.region_left),
+                ("Oben (T)", self.region_top),
+                ("Breite (B)", self.region_width),
+                ("Höhe (H)", self.region_height),
+            )
         ):
-            region_row.addWidget(QLabel(label))
-            region_row.addWidget(spin)
-        self.monitor_combo = QComboBox()
-        refresh = QPushButton("Monitore aktualisieren")
-        refresh.clicked.connect(self._refresh_monitors)
-        self.btn_preview = QPushButton("Vorschau starten")
-        self.btn_preview.clicked.connect(self._toggle_preview)
-        self.btn_snapshot = QPushButton("Snapshot aufnehmen && Vorschau einfrieren")
-        self.btn_snapshot.clicked.connect(self._take_snapshot)
-        self.btn_clear_corners = QPushButton("Ecken zurücksetzen")
+            region_row.addWidget(QLabel(label), index // 2, (index % 2) * 2)
+            region_row.addWidget(spin, index // 2, (index % 2) * 2 + 1)
+        source_layout.addWidget(QLabel("Monitor"))
+        source_layout.addWidget(self.monitor_combo)
+        source_layout.addWidget(refresh)
+        source_layout.addWidget(self.use_region)
+        source_layout.addLayout(region_row)
+        form.addWidget(source)
+
+        calibration = QGroupBox("2 · Brett einrahmen")
+        calibration_layout = QVBoxLayout(calibration)
+        calibration_hint = QLabel(
+            "Automatisch: Das Brett wird nach dem Snapshot rot eingerahmt.\n"
+            "Manuell: vier Ecken klicken (oben links zuerst) oder mit gedrückter "
+            "Maustaste ein Rechteck um das Brett aufziehen."
+        )
+        calibration_hint.setWordWrap(True)
+        calibration_layout.addWidget(calibration_hint)
+        self.auto_frame_check = QCheckBox("Beim Snapshot automatisch rot einrahmen")
+        self.auto_frame_check.setChecked(True)
+        self.auto_frame_check.toggled.connect(self._auto_frame_toggled)
+        self.btn_auto_frame = QPushButton("Brett jetzt automatisch einrahmen")
+        self.btn_auto_frame.clicked.connect(self._auto_frame_and_show)
+        self.btn_clear_corners = QPushButton("Rahmen / Ecken zurücksetzen")
         self.btn_clear_corners.clicked.connect(self._reset_corners)
         self.orientation_combo = QComboBox()
         self.orientation_combo.addItems(["white_bottom", "white_top", "white_left", "white_right"])
         self.warp_size_spin = QSpinBox()
         self.warp_size_spin.setRange(128, 1600)
         self.warp_size_spin.setSingleStep(64)
+        calibration_layout.addWidget(self.auto_frame_check)
+        calibration_layout.addWidget(self.btn_auto_frame)
+        calibration_layout.addWidget(self.btn_clear_corners)
+        calibration_layout.addWidget(QLabel("Brettorientierung (aus Sicht des Bildes)"))
+        calibration_layout.addWidget(self.orientation_combo)
+        calibration_layout.addWidget(QLabel("Erkennungsgröße (quadratisch)"))
+        calibration_layout.addWidget(self.warp_size_spin)
+        form.addWidget(calibration)
+
+        actions = QGroupBox("3 · Aufnahme und Analyse")
+        actions_layout = QVBoxLayout(actions)
+        self.btn_preview = QPushButton("Vorschau starten")
+        self.btn_preview.clicked.connect(self._toggle_preview)
+        self.btn_snapshot = QPushButton("Snapshot aufnehmen und einfrieren")
+        self.btn_snapshot.clicked.connect(self._take_snapshot)
         self.confirm_box = QCheckBox(
-            "Ich bestätige: eigene Trainingsstellung oder abgeschlossene Partie "
-            "(keine laufende Online-Partie)."
+            "Keine laufende Online-Partie (nur Training/Nachbereitung)"
+        )
+        self.confirm_box.setToolTip(
+            "Bestätigt eine eigene Trainingsstellung, einen eingefrorenen Snapshot "
+            "oder eine abgeschlossene Partie – keine Hilfe während laufender Online-Partien."
         )
         self.confirm_box.stateChanged.connect(self._on_confirm_changed)
         self.btn_recognize = QPushButton("Snapshot im Hintergrund erkennen")
         self.btn_recognize.clicked.connect(self._recognize_snapshot)
+        self.btn_review = QPushButton("Erkennung prüfen und korrigieren")
+        self.btn_review.clicked.connect(lambda: self.tabs.setCurrentWidget(self.training_tab))
         self.btn_analyze_snap = QPushButton("Geprüften Snapshot analysieren")
         self.btn_analyze_snap.clicked.connect(self._analyze_snapshot)
-        self.btn_review = QPushButton("Erkennung prüfen / Felder korrigieren")
-        self.btn_review.clicked.connect(lambda: self.tabs.setCurrentWidget(self.training_tab))
-        self.capture_status = QLabel("Keine Aufnahme. Vorschau und Erkennung starten keine Engine automatisch.")
+        self.capture_status = QLabel(
+            "Keine Aufnahme. Vorschau und Erkennung starten keine Engine automatisch."
+        )
         self.capture_status.setWordWrap(True)
-        form.addWidget(QLabel("Monitor"))
-        form.addWidget(self.monitor_combo)
-        form.addWidget(refresh)
-        form.addWidget(self.use_region)
-        form.addLayout(region_row)
-        form.addWidget(self.btn_preview)
-        form.addWidget(self.btn_snapshot)
-        form.addWidget(QLabel("Brettorientierung"))
-        form.addWidget(self.orientation_combo)
-        form.addWidget(QLabel("Erkennungsgröße (quadratisch)"))
-        form.addWidget(self.warp_size_spin)
-        form.addWidget(self.btn_clear_corners)
-        form.addWidget(self.confirm_box)
-        form.addWidget(self.btn_recognize)
-        form.addWidget(self.btn_review)
-        form.addWidget(self.btn_analyze_snap)
-        form.addWidget(self.capture_status)
+        actions_layout.addWidget(self.btn_preview)
+        actions_layout.addWidget(self.btn_snapshot)
+        actions_layout.addWidget(self.confirm_box)
+        actions_layout.addWidget(self.btn_recognize)
+        actions_layout.addWidget(self.btn_review)
+        actions_layout.addWidget(self.btn_analyze_snap)
+        actions_layout.addWidget(self.capture_status)
+        form.addWidget(actions)
         form.addStretch()
+
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(
-            QLabel("Kalibrierung: vier Ecken im Uhrzeigersinn klicken (oben links zuerst).")
+        calibration_caption = QLabel(
+            "Kalibrieransicht: rot = gewählter Brettrahmen. Klick = Ecke, Ziehen = Rechteck."
         )
+        calibration_caption.setWordWrap(True)
+        right_layout.addWidget(calibration_caption)
         self.calib_view = CalibrationView()
         self.calib_view.corner_clicked.connect(self._add_corner)
+        self.calib_view.rect_selected.connect(self._set_rectangle_corners)
         right_layout.addWidget(self.calib_view)
-        splitter.addWidget(left)
+
+        left_scroll.setMinimumWidth(400)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        splitter.addWidget(left_scroll)
         splitter.addWidget(right)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([430, 970])
         layout.addWidget(splitter)
         return widget
 
-    def _engine_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QFormLayout(widget)
+    def _settings_tab(self) -> QWidget:
+        content = QWidget()
+        outer = QVBoxLayout(content)
+
+        engine_group = QGroupBox("Stockfish-Engine")
+        engine_form = QFormLayout(engine_group)
         self.engine_path = QLineEdit()
-        self.engine_path.setPlaceholderText("Pfad zur separat installierten stockfish.exe oder STOCKFISH_PATH")
+        self.engine_path.setPlaceholderText(
+            "Pfad zur separat installierten stockfish.exe oder STOCKFISH_PATH"
+        )
         browse = QPushButton("Durchsuchen…")
         browse.clicked.connect(self._browse_engine)
-        path_wrap = self._with_button(self.engine_path, browse)
         self.depth_spin = QSpinBox()
         self.depth_spin.setRange(0, 40)
         self.depth_spin.setSpecialValueText("aus (nur Zeit)")
@@ -398,7 +679,80 @@ class MainWindow(QMainWindow):
         self.btn_engine_stop.clicked.connect(self._stop_engine)
         self.engine_status = QLabel("Engine nicht gestartet.")
         self.engine_status.setWordWrap(True)
+        for spin in (
+            self.depth_spin,
+            self.time_spin,
+            self.threads_spin,
+            self.hash_spin,
+            self.multipv_spin,
+        ):
+            spin.setMaximumWidth(180)
+        engine_form.addRow("Stockfish.exe", self._with_button(self.engine_path, browse))
+        engine_form.addRow("Suchtiefe", self.depth_spin)
+        engine_form.addRow("Zeitbudget", self.time_spin)
+        engine_form.addRow("Threads", self.threads_spin)
+        engine_form.addRow("Hash", self.hash_spin)
+        engine_form.addRow("Beste Zugfolgen (MultiPV)", self.multipv_spin)
+        engine_buttons = QWidget()
+        engine_buttons_layout = QHBoxLayout(engine_buttons)
+        engine_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        engine_buttons_layout.addWidget(self.btn_engine_start)
+        engine_buttons_layout.addWidget(self.btn_engine_stop)
+        engine_buttons_layout.addStretch()
+        engine_form.addRow(engine_buttons)
+        engine_form.addRow("Status", self.engine_status)
 
+        display_group = QGroupBox("Programmgröße und Darstellung")
+        display_form = QFormLayout(display_group)
+        self.window_width_spin = QSpinBox()
+        self.window_width_spin.setRange(720, 6000)
+        self.window_width_spin.setSuffix(" px")
+        self.window_height_spin = QSpinBox()
+        self.window_height_spin.setRange(520, 4000)
+        self.window_height_spin.setSuffix(" px")
+        size_row = QHBoxLayout()
+        size_row.addWidget(QLabel("Breite"))
+        size_row.addWidget(self.window_width_spin)
+        size_row.addSpacing(12)
+        size_row.addWidget(QLabel("Höhe"))
+        size_row.addWidget(self.window_height_spin)
+        size_row.addStretch()
+        self.apply_size_button = QPushButton("Fenstergröße anwenden")
+        self.apply_size_button.clicked.connect(self._apply_size_from_fields)
+        self.apply_size_button.setToolTip("Die aktuelle Fenstergröße wird dauerhaft gespeichert.")
+        preset_row = QHBoxLayout()
+        for label, width, height in (
+            ("Klein", 1100, 760),
+            ("Mittel", 1380, 900),
+            ("Groß", 1680, 1050),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, w=width, h=height: self._apply_size_preset(w, h)
+            )
+            preset_row.addWidget(button)
+        preset_row.addStretch()
+        self.maximized_check = QCheckBox("Beim Start maximiert")
+        self.maximized_check.toggled.connect(self._set_start_maximized)
+        self.font_scale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_scale_slider.setRange(70, 200)
+        self.font_scale_slider.setSingleStep(5)
+        self.font_scale_slider.setTickInterval(10)
+        self.font_scale_slider.setToolTip("Schrift- und Steuerelementgröße in Prozent")
+        self.font_scale_value = QLabel("100 %")
+        font_row = QHBoxLayout()
+        font_row.addWidget(self.font_scale_slider, 1)
+        font_row.addWidget(self.font_scale_value)
+        for spin in (self.window_width_spin, self.window_height_spin):
+            spin.setMaximumWidth(150)
+        display_form.addRow("Fenstergröße", size_row)
+        display_form.addRow(self.apply_size_button)
+        display_form.addRow("Voreinstellungen", preset_row)
+        display_form.addRow(self.maximized_check)
+        display_form.addRow("Schriftgröße", font_row)
+
+        recognition_group = QGroupBox("Figurerkennung")
+        recognition_form = QFormLayout(recognition_group)
         self.model_path_edit = QLineEdit()
         self.model_path_edit.setPlaceholderText("Leer = mitgeliefertes HOG-SVM-Modell")
         model_browse = QPushButton("Modell…")
@@ -412,35 +766,69 @@ class MainWindow(QMainWindow):
         self.confidence_spin.setSingleStep(0.05)
         apply_recognition = QPushButton("Erkennungseinstellungen anwenden")
         apply_recognition.clicked.connect(self._apply_recognition_settings)
+        for spin in (self.occupancy_spin, self.confidence_spin):
+            spin.setMaximumWidth(180)
+        recognition_form.addRow("Figurenmodell (XML)", self._with_button(self.model_path_edit, model_browse))
+        recognition_form.addRow("Belegungsschwelle (Std.-Abw.)", self.occupancy_spin)
+        recognition_form.addRow("Warnschwelle Konfidenz", self.confidence_spin)
+        recognition_form.addRow(apply_recognition)
 
+        overlay_group = QGroupBox("Overlay und Brettrahmen")
+        overlay_form = QFormLayout(overlay_group)
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(20, 100)
         self.scale_slider = QSlider(Qt.Orientation.Horizontal)
         self.scale_slider.setRange(60, 200)
+        self.frame_check = QCheckBox("Roten Rahmen um das Spielfeld zeichnen")
+        self.frame_check.toggled.connect(self._frame_settings_changed)
+        self.frame_width_spin = QSpinBox()
+        self.frame_width_spin.setRange(1, 24)
+        self.frame_width_spin.setSuffix(" px")
+        self.frame_width_spin.valueChanged.connect(self._frame_settings_changed)
+        self.frame_color_button = QPushButton("#ff2d2d")
+        self.frame_color_button.setMaximumWidth(240)
+        self.frame_color_button.clicked.connect(self._choose_frame_color)
+        self.coordinate_scale_spin = QSpinBox()
+        self.coordinate_scale_spin.setRange(0, 400)
+        self.coordinate_scale_spin.setSuffix(" %")
+        self.coordinate_scale_spin.setSpecialValueText("automatisch")
+        self.coordinate_scale_spin.setToolTip(
+            "Nur nötig, wenn Pfeile bei Windows-Skalierung (125/150/200 %) versetzt wirken. "
+            "0 = automatische DPI-Erkennung."
+        )
+        self.coordinate_scale_spin.valueChanged.connect(self._frame_settings_changed)
         self.hotkey_edit = QLineEdit()
         apply_hotkey = QPushButton("Hotkey anwenden")
         apply_hotkey.clicked.connect(self._apply_hotkey)
         self.btn_overlay = QPushButton("Overlay ein/aus")
         self.btn_overlay.clicked.connect(self._toggle_overlay)
+        self.btn_test_overlay = QPushButton("Overlay testen (ohne Engine)")
+        self.btn_test_overlay.clicked.connect(self._test_overlay)
+        for spin in (self.frame_width_spin, self.coordinate_scale_spin):
+            spin.setMaximumWidth(180)
+        overlay_form.addRow("Deckkraft %", self.opacity_slider)
+        overlay_form.addRow("Skalierung Panel %", self.scale_slider)
+        overlay_form.addRow(self.frame_check)
+        overlay_form.addRow("Rahmenbreite", self.frame_width_spin)
+        overlay_form.addRow("Rahmenfarbe", self.frame_color_button)
+        overlay_form.addRow("DPI-Korrektur", self.coordinate_scale_spin)
+        overlay_form.addRow("Globaler Hotkey", self._with_button(self.hotkey_edit, apply_hotkey))
+        overlay_form.addRow(self.btn_overlay)
+        overlay_form.addRow(self.btn_test_overlay)
+        overlay_form.addRow(
+            QLabel("Panel am Titel verschieben, an ◢ skalieren. Pfeile bleiben klickdurchlässig.")
+        )
 
-        layout.addRow("Stockfish.exe", path_wrap)
-        layout.addRow("Suchtiefe", self.depth_spin)
-        layout.addRow("Zeitbudget", self.time_spin)
-        layout.addRow("Threads", self.threads_spin)
-        layout.addRow("Hash", self.hash_spin)
-        layout.addRow("Beste Zugfolgen (MultiPV)", self.multipv_spin)
-        layout.addRow(self.btn_engine_start, self.btn_engine_stop)
-        layout.addRow("Status", self.engine_status)
-        layout.addRow("Figurenmodell (XML)", self._with_button(self.model_path_edit, model_browse))
-        layout.addRow("Belegungsschwelle (Std.-Abw.)", self.occupancy_spin)
-        layout.addRow("Warnschwelle Konfidenz", self.confidence_spin)
-        layout.addRow(apply_recognition)
-        layout.addRow("Overlay-Deckkraft %", self.opacity_slider)
-        layout.addRow("Overlay-Skalierung %", self.scale_slider)
-        layout.addRow("Globaler Hotkey", self._with_button(self.hotkey_edit, apply_hotkey))
-        layout.addRow(self.btn_overlay)
-        layout.addRow(QLabel("Panel am Titel verschieben, an ◢ skalieren. Pfeile bleiben klickdurchlässig."))
-        return widget
+        outer.addWidget(engine_group)
+        outer.addWidget(display_group)
+        outer.addWidget(recognition_group)
+        outer.addWidget(overlay_group)
+        outer.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        return scroll
 
     def _training_tab(self) -> QWidget:
         widget = QWidget()
@@ -532,12 +920,26 @@ class MainWindow(QMainWindow):
     def _analysis_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        engine_row = QHBoxLayout()
+        self.analysis_engine_label = QLabel("Engine: nicht gestartet.")
+        self.analysis_engine_label.setWordWrap(True)
+        start_engine = QPushButton("Engine starten")
+        start_engine.clicked.connect(self._start_engine)
+        open_settings = QPushButton("Engine-Einstellungen")
+        open_settings.clicked.connect(lambda: self.tabs.setCurrentWidget(self.engine_tab))
+        engine_row.addWidget(self.analysis_engine_label, 1)
+        engine_row.addWidget(start_engine)
+        engine_row.addWidget(open_settings)
+        layout.addLayout(engine_row)
         self.analysis_summary = QLabel("Noch keine Analyse. Bewertungen werden aus Weiß-Sicht angezeigt.")
         self.analysis_summary.setWordWrap(True)
         self.analysis_tree = QTreeWidget()
         self.analysis_tree.setColumnCount(5)
         self.analysis_tree.setHeaderLabels(["PV", "Bewertung (Weiß)", "Tiefe", "Bester Zug", "Variante (SAN)"])
-        self.analysis_tree.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header = self.analysis_tree.header()
+        for column in (0, 1, 2, 3):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.analysis_tree.setAlternatingRowColors(True)
         export_analysis = QPushButton("Aktuelles Analyseergebnis als Text exportieren")
         export_analysis.clicked.connect(self._export_analysis)
@@ -590,7 +992,7 @@ class MainWindow(QMainWindow):
         wrap.setLayout(row)
         return wrap
 
-    # -------------------------------------------------------------- Settings
+    # ---------------------------------------------------------- Einstellungen
     def _load_settings_into_ui(self) -> None:
         self.engine_path.setText(self.config.engine.executable)
         self.depth_spin.setValue(self.config.engine.depth)
@@ -606,6 +1008,44 @@ class MainWindow(QMainWindow):
         self.model_path_edit.setText(self.config.model_path)
         self.occupancy_spin.setValue(self.config.occupancy_std_threshold)
         self.confidence_spin.setValue(self.config.min_piece_confidence)
+
+        self.frame_check.blockSignals(True)
+        self.frame_width_spin.blockSignals(True)
+        self.coordinate_scale_spin.blockSignals(True)
+        self.frame_check.setChecked(self.config.overlay.show_frame)
+        self.frame_width_spin.setValue(self.config.overlay.frame_width)
+        self.coordinate_scale_spin.setValue(self.config.overlay.coordinate_scale_percent)
+        self.frame_check.blockSignals(False)
+        self.frame_width_spin.blockSignals(False)
+        self.coordinate_scale_spin.blockSignals(False)
+        self._frame_color = self.config.overlay.frame_color
+        self.frame_color_button.setText(self._frame_color)
+        self.frame_color_button.setStyleSheet(
+            f"background:{self._frame_color}; color:#111; font-weight:700;"
+        )
+
+        self.auto_frame_check.blockSignals(True)
+        self.auto_frame_check.setChecked(self.config.capture.auto_frame)
+        self.auto_frame_check.blockSignals(False)
+
+        for widget in (self.window_width_spin, self.window_height_spin):
+            widget.blockSignals(True)
+        self.window_width_spin.setValue(self.config.ui.window_width)
+        self.window_height_spin.setValue(self.config.ui.window_height)
+        for widget in (self.window_width_spin, self.window_height_spin):
+            widget.blockSignals(False)
+        self.maximized_check.blockSignals(True)
+        self.maximized_check.setChecked(self.config.ui.start_maximized)
+        self.maximized_check.blockSignals(False)
+        if hasattr(self, "maximized_action"):
+            self.maximized_action.blockSignals(True)
+            self.maximized_action.setChecked(self.config.ui.start_maximized)
+            self.maximized_action.blockSignals(False)
+        self.font_scale_slider.blockSignals(True)
+        self.font_scale_slider.setValue(self.config.ui.font_scale_percent)
+        self.font_scale_slider.blockSignals(False)
+        self.font_scale_value.setText(f"{self.config.ui.font_scale_percent} %")
+
         if self.config.capture.region:
             self.use_region.setChecked(True)
             self.region_left.setValue(self.config.capture.region["left"])
@@ -614,6 +1054,7 @@ class MainWindow(QMainWindow):
             self.region_height.setValue(self.config.capture.region["height"])
         self.opacity_slider.valueChanged.connect(self._opacity_changed)
         self.scale_slider.valueChanged.connect(self._scale_changed)
+        self.font_scale_slider.valueChanged.connect(self._font_slider_changed)
 
     def _sync_engine_settings(self) -> None:
         self.config.engine.executable = self.engine_path.text().strip()
@@ -625,8 +1066,17 @@ class MainWindow(QMainWindow):
         self.config.overlay.opacity = self.opacity_slider.value() / 100.0
         self.config.overlay.scale_percent = self.scale_slider.value()
         self.config.overlay.hotkey = self.hotkey_edit.text().strip() or self.config.overlay.hotkey
+        self.config.overlay.show_frame = self.frame_check.isChecked()
+        self.config.overlay.frame_width = self.frame_width_spin.value()
+        self.config.overlay.frame_color = getattr(self, "_frame_color", self.config.overlay.frame_color)
+        self.config.overlay.coordinate_scale_percent = self.coordinate_scale_spin.value()
         self.config.capture.orientation = self.orientation_combo.currentText()
         self.config.capture.warp_size = self.warp_size_spin.value()
+        self.config.capture.auto_frame = self.auto_frame_check.isChecked()
+        self.config.ui.window_width = self.window_width_spin.value()
+        self.config.ui.window_height = self.window_height_spin.value()
+        self.config.ui.font_scale_percent = self.font_scale_slider.value()
+        self.config.ui.start_maximized = self.maximized_check.isChecked()
         monitor_data = self.monitor_combo.currentData()
         self.config.capture.monitor_index = int(monitor_data) if monitor_data is not None else 1
         if self.use_region.isChecked():
@@ -643,6 +1093,118 @@ class MainWindow(QMainWindow):
         self.config.occupancy_std_threshold = self.occupancy_spin.value()
         self.config.min_piece_confidence = self.confidence_spin.value()
         self.config.side_to_move = "w" if self.turn_combo.currentIndex() == 0 else "b"
+
+    # ------------------------------------------------------ Fenster & Schrift
+    def _initial_geometry(self) -> None:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QRect(0, 0, 1380, 900)
+        width = min(self.config.ui.window_width, available.width())
+        height = min(self.config.ui.window_height, available.height())
+        self.resize(width, height)
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+    def _update_size_fields(self, width: int, height: int, maximized: bool) -> None:
+        for widget in (self.window_width_spin, self.window_height_spin, self.maximized_check):
+            widget.blockSignals(True)
+        self.window_width_spin.setValue(max(720, width))
+        self.window_height_spin.setValue(max(520, height))
+        self.maximized_check.setChecked(maximized)
+        for widget in (self.window_width_spin, self.window_height_spin, self.maximized_check):
+            widget.blockSignals(False)
+        if hasattr(self, "maximized_action"):
+            self.maximized_action.blockSignals(True)
+            self.maximized_action.setChecked(maximized)
+            self.maximized_action.blockSignals(False)
+        self.config.ui.window_width = self.window_width_spin.value()
+        self.config.ui.window_height = self.window_height_spin.value()
+        self.config.ui.start_maximized = maximized
+
+    def _capture_window_size(self) -> None:
+        if self.isMaximized():
+            self._update_size_fields(
+                self.config.ui.window_width, self.config.ui.window_height, True
+            )
+            self.statusBar().showMessage("Startgröße gespeichert: maximiert.")
+        else:
+            self._update_size_fields(self.width(), self.height(), False)
+            self.statusBar().showMessage(
+                f"Fenstergröße gespeichert: {self.width()} × {self.height()}."
+            )
+        self._refresh_overview()
+
+    def _apply_size_preset(self, width: int, height: int) -> None:
+        self._update_size_fields(width, height, False)
+        if self.isMaximized():
+            self.showNormal()
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QRect(0, 0, width, height)
+        self.resize(min(width, available.width()), min(height, available.height()))
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+        self._refresh_overview()
+        self.statusBar().showMessage(f"Fenstergröße: {width} × {height}.")
+
+    def _apply_size_from_fields(self) -> None:
+        self._apply_size_preset(self.window_width_spin.value(), self.window_height_spin.value())
+        self._save_config()
+
+    def _set_start_maximized(self, checked: bool) -> None:
+        self.config.ui.start_maximized = bool(checked)
+        for widget in (self.maximized_check, getattr(self, "maximized_action", None)):
+            if widget is None:
+                continue
+            widget.blockSignals(True)
+            widget.setChecked(bool(checked))
+            widget.blockSignals(False)
+        self._refresh_overview()
+
+    def _font_slider_changed(self, value: int) -> None:
+        self._apply_font_scale(value, from_slider=True)
+
+    def _adjust_font_scale(self, delta: int) -> None:
+        self._apply_font_scale(self.config.ui.font_scale_percent + delta)
+
+    def _apply_font_scale(self, percent: int, announce: bool = True, from_slider: bool = False) -> None:
+        percent = clamp_font_scale(percent)
+        self.config.ui.font_scale_percent = percent
+        application = QApplication.instance()
+        if application is not None:
+            application.setStyleSheet(build_stylesheet(percent))
+        self.font_scale_slider.blockSignals(True)
+        self.font_scale_slider.setValue(percent)
+        self.font_scale_slider.blockSignals(False)
+        self.font_scale_value.setText(f"{percent} %")
+        if announce:
+            self.statusBar().showMessage(f"Schriftgröße: {percent} %.")
+        self._refresh_overview()
+
+    def _show_version_info(self) -> None:
+        history = "".join(
+            f"<li><b>{version}</b> – {description}</li>" for version, description in VERSION_HISTORY
+        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Version / Info – {version_label()}")
+        dialog.setMinimumWidth(520)
+        layout = QVBoxLayout(dialog)
+        heading = QLabel(f"<h2>{full_version_label()}</h2>")
+        layout.addWidget(heading)
+        text = QLabel(
+            "Versionsschema: Jede neue veröffentlichte Fassung erhält die nächste Nummer "
+            "(v1, v2, v3 …). Die Nummer steht im Fenstertitel, im Start-Tab und hier."
+            f"<ul>{history}</ul>"
+            "<p>Stockfish ist nicht enthalten und wird separat unter "
+            "<a href='https://stockfishchess.org/download/'>stockfishchess.org/download</a> bezogen.</p>"
+        )
+        text.setWordWrap(True)
+        text.setOpenExternalLinks(True)
+        layout.addWidget(text)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        buttons.accepted.connect(dialog.accept)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def _apply_recognition_settings(self) -> None:
         self._sync_engine_settings()
@@ -715,6 +1277,18 @@ class MainWindow(QMainWindow):
             self.capture_status.setText(
                 "Snapshot eingefroren. Jetzt vier Ecken prüfen, Orientierung wählen und erkennen."
             )
+            if self.config.capture.auto_frame:
+                detected = self._detect_frame_corners(silent=True)
+                if detected:
+                    self.capture_status.setText(
+                        "Snapshot eingefroren. Brett automatisch rot eingerahmt – "
+                        "Rahmen prüfen und danach erkennen."
+                    )
+                else:
+                    self.capture_status.setText(
+                        "Snapshot eingefroren. Brett nicht sicher gefunden: vier Ecken klicken "
+                        "oder ein Rechteck aufziehen."
+                    )
         elif self.live_preview and len(self.corners) == 4:
             try:
                 warped, _ = warp_board(frame, self.corners, self.config.capture.warp_size)
@@ -728,6 +1302,7 @@ class MainWindow(QMainWindow):
         else:
             self.capture_status.setText("Vorschau aktiv; keine automatische Engine-Aktualisierung.")
         self.calib_view.set_frame(self._annotate_corners(self.display_frame))
+        self._update_overlay_frame()
         self._update_action_states()
 
     def _on_capture_error(self, message: str, purpose: str) -> None:
@@ -739,21 +1314,81 @@ class MainWindow(QMainWindow):
 
     def _annotate_corners(self, frame: np.ndarray) -> np.ndarray:
         visual = frame.copy()
+        red = (45, 45, 255)
+        if len(self.corners) == 4:
+            points = np.array(self.corners, dtype=np.int32).reshape(-1, 1, 2)
+            overlay = visual.copy()
+            cv2.fillPoly(overlay, [points], (40, 40, 220))
+            visual = cv2.addWeighted(overlay, 0.10, visual, 0.90, 0)
+            cv2.polylines(visual, [points], True, red, 4)
         for index, (x, y) in enumerate(self.corners):
-            cv2.circle(visual, (round(x), round(y)), 8, (0, 220, 120), -1)
+            cv2.circle(visual, (round(x), round(y)), 9, red, -1)
+            cv2.circle(visual, (round(x), round(y)), 4, (255, 255, 255), -1)
             cv2.putText(
                 visual,
                 str(index + 1),
-                (round(x) + 10, round(y) - 10),
+                (round(x) + 12, round(y) - 12),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (0, 220, 120),
+                red,
                 2,
             )
-        if len(self.corners) == 4:
-            points = np.array(self.corners, dtype=np.int32).reshape(-1, 1, 2)
-            cv2.polylines(visual, [points], True, (0, 200, 255), 2)
         return visual
+
+    def _set_corners(self, corners: list[list[float]], source: str = "") -> None:
+        try:
+            validate_corners(corners)
+        except ValueError as exc:
+            self.capture_status.setText(f"Rahmen ungültig: {exc}")
+            return
+        self.corners = [[float(point[0]), float(point[1])] for point in corners]
+        self.config.capture.corners = deepcopy(self.corners)
+        if self.display_frame is not None:
+            self.calib_view.set_frame(self._annotate_corners(self.display_frame))
+        self._update_overlay_frame()
+        if source:
+            self.capture_status.setText(source)
+        self._update_action_states()
+
+    def _detect_frame_corners(self, silent: bool = False) -> bool:
+        frame = self.last_frame if self.last_frame is not None else self.display_frame
+        if frame is None:
+            if not silent:
+                self.capture_status.setText(
+                    "Bitte zuerst einen Snapshot aufnehmen, um das Brett automatisch einzurahmen."
+                )
+            return False
+        corners = detect_board_corners(frame)
+        if corners is None:
+            if not silent:
+                self.capture_status.setText(
+                    "Kein Brett gefunden. Bitte vier Ecken klicken oder ein Rechteck aufziehen."
+                )
+            return False
+        self._set_corners(
+            corners,
+            "Brett automatisch rot eingerahmt. Sitzt der Rahmen nicht, Ecken neu setzen."
+            if not silent
+            else "",
+        )
+        return True
+
+    def _auto_frame_and_show(self) -> None:
+        self.tabs.setCurrentWidget(self.capture_tab)
+        self._detect_frame_corners()
+
+    def _auto_frame_toggled(self, checked: bool) -> None:
+        self.config.capture.auto_frame = bool(checked)
+        self.statusBar().showMessage(
+            "Automatischer roter Brettrahmen aktiviert." if checked else "Automatischer Rahmen aus."
+        )
+        self._refresh_overview()
+
+    def _set_rectangle_corners(self, x0: float, y0: float, x1: float, y1: float) -> None:
+        self._set_corners(
+            rectangle_to_corners(x0, y0, x1, y1),
+            "Rechteck als Brettrahmen übernommen. Bei Bedarf Ecken einzeln nachjustieren.",
+        )
 
     def _add_corner(self, x: float, y: float) -> None:
         if len(self.corners) >= 4:
@@ -763,6 +1398,8 @@ class MainWindow(QMainWindow):
             self.calib_view.set_frame(self._annotate_corners(self.display_frame))
         self.capture_status.setText(f"{len(self.corners)} / 4 Ecken gesetzt.")
         self._sync_engine_settings()
+        self._update_overlay_frame()
+        self._update_action_states()
 
     def _reset_corners(self) -> None:
         self.corners = []
@@ -770,8 +1407,11 @@ class MainWindow(QMainWindow):
         self.snapshot_recognized = False
         self.config.capture.corners = None
         if self.display_frame is not None:
-            self.calib_view.set_frame(self.display_frame)
-        self.capture_status.setText("Ecken gelöscht; Snapshot muss nach neuer Kalibrierung erneut erkannt werden.")
+            self.calib_view.set_frame(self._annotate_corners(self.display_frame))
+        self.overlay.update_frame(None, self.capture_origin)
+        self.capture_status.setText(
+            "Rahmen gelöscht; Snapshot muss nach neuer Kalibrierung erneut erkannt werden."
+        )
         self._update_action_states()
 
     # ------------------------------------------------------------ Recognition
@@ -1092,8 +1732,12 @@ class MainWindow(QMainWindow):
         current = result.fen == self.board.fen()
         if current:
             self.board_widget.set_analysis(result.lines)
-            calibrated = self.corners if self.mode == "frozen_snapshot" and len(self.corners) == 4 else None
+            calibrated = self.corners if len(self.corners) == 4 else None
             self.overlay.apply_settings(self.config.overlay)
+            if self.overlay.user_hidden:
+                self.overlay.user_hidden = False
+                self.config.overlay.visible = True
+                self.overlay.present()
             self.overlay.set_analysis(
                 result,
                 calibrated,
@@ -1112,15 +1756,28 @@ class MainWindow(QMainWindow):
         self.analysis_in_flight = False
         self.engine_start_in_flight = False
         self.engine_ready = False
+        self._update_engine_hint()
         logger.error(message)
         self.engine_status.setText("Engine-Fehler: " + message.split("\n", 1)[0])
         QMessageBox.warning(self, "Engine-Fehler", message.split("\n", 1)[0])
         self.statusBar().showMessage("Engine-Fehler; bitte Pfad/Einstellungen prüfen und Engine neu starten.")
         self._update_action_states()
 
+    def _update_engine_hint(self) -> None:
+        if not hasattr(self, "analysis_engine_label"):
+            return
+        if self.engine_ready:
+            text = "Engine: bereit."
+        elif self.engine_start_in_flight:
+            text = "Engine: startet …"
+        else:
+            text = "Engine: nicht gestartet – bitte vor der Analyse starten."
+        self.analysis_engine_label.setText(text)
+
     def _on_engine_started(self, name: str) -> None:
         self.engine_ready = True
         self.engine_start_in_flight = False
+        self._update_engine_hint()
         self.engine_status.setText(f"Engine bereit: {name}")
         self.statusBar().showMessage(f"Engine bereit: {name}")
         self._update_action_states()
@@ -1128,6 +1785,7 @@ class MainWindow(QMainWindow):
     def _on_engine_stopped(self) -> None:
         self.engine_ready = False
         self.engine_start_in_flight = False
+        self._update_engine_hint()
         self.engine_status.setText("Engine gestoppt.")
         self.statusBar().showMessage("Engine gestoppt")
         self._update_action_states()
@@ -1138,6 +1796,7 @@ class MainWindow(QMainWindow):
         self._sync_engine_settings()
         self.engine_ready = False
         self.engine_start_in_flight = True
+        self._update_engine_hint()
         self.engine_status.setText("Engine wird gestartet …")
         self._update_action_states()
         self.worker.request_start.emit(deepcopy(self.config.engine), None)
@@ -1174,6 +1833,70 @@ class MainWindow(QMainWindow):
         self.config.overlay.panel_offset_y = settings.panel_offset_y
         self.config.overlay.panel_width = settings.panel_width
         self.config.overlay.panel_height = settings.panel_height
+        self.config.overlay.scale_percent = settings.scale_percent
+
+    def _frame_settings_changed(self) -> None:
+        if not hasattr(self, "frame_check"):
+            return
+        self.config.overlay.show_frame = self.frame_check.isChecked()
+        self.config.overlay.frame_width = self.frame_width_spin.value()
+        self.config.overlay.coordinate_scale_percent = self.coordinate_scale_spin.value()
+        self.overlay.apply_settings(self.config.overlay)
+        self.overlay.update_frame(
+            self.corners if len(self.corners) == 4 else None,
+            self.capture_origin,
+            self.orientation_combo.currentText(),
+            self.config.capture.warp_size,
+        )
+        self._refresh_overview()
+
+    def _choose_frame_color(self) -> None:
+        color = QColorDialog.getColor(QColor(self._frame_color), self, "Rahmenfarbe wählen")
+        if not color.isValid():
+            return
+        self._frame_color = color.name()
+        self.config.overlay.frame_color = self._frame_color
+        self.frame_color_button.setText(self._frame_color)
+        self.frame_color_button.setStyleSheet(
+            f"background:{self._frame_color}; color:#111; font-weight:700;"
+        )
+        self.overlay.apply_settings(self.config.overlay)
+        self.overlay.update_frame(
+            self.corners if len(self.corners) == 4 else None,
+            self.capture_origin,
+            self.orientation_combo.currentText(),
+            self.config.capture.warp_size,
+        )
+
+    def _update_overlay_frame(self) -> None:
+        """Roter Rahmen folgt der aktuellen Kalibrierung – auch ohne Analyse."""
+        if not hasattr(self, "overlay"):
+            return
+        self.overlay.update_frame(
+            self.corners if len(self.corners) == 4 else None,
+            self.capture_origin,
+            self.orientation_combo.currentText() if hasattr(self, "orientation_combo") else "white_bottom",
+            self.config.capture.warp_size,
+        )
+
+    def _test_overlay(self) -> None:
+        self._sync_engine_settings()
+        if self.overlay.user_hidden:
+            self.overlay.user_hidden = False
+            self.config.overlay.visible = True
+        self.overlay.cover_virtual_desktop()
+        self.overlay.present()
+        self.overlay.apply_settings(self.config.overlay)
+        self._update_overlay_frame()
+        self.overlay.show_test()
+        self._refresh_overview()
+        message = (
+            "Overlay-Test aktiv. "
+            + ("Rahmen und Demo-Pfeil werden angezeigt." if len(self.corners) == 4
+               else "Panel sichtbar; für Rahmen und Pfeile zuerst das Brett einrahmen.")
+        )
+        logger.info("Overlay-Test: %s", self.overlay.describe_state())
+        self.statusBar().showMessage(message, 10_000)
 
     def _toggle_overlay(self) -> None:
         self.overlay.user_hidden = not self.overlay.user_hidden
@@ -1181,9 +1904,10 @@ class MainWindow(QMainWindow):
         if self.overlay.user_hidden:
             self.overlay.hide()
         else:
-            self.overlay.cover_virtual_desktop()
-            self.overlay.show()
+            self.overlay.present()
             self.overlay.set_click_through(True)
+            self._update_overlay_frame()
+        self._refresh_overview()
         self.statusBar().showMessage("Overlay aus" if self.overlay.user_hidden else "Overlay ein")
 
     def _install_hotkey(self) -> bool:
@@ -1342,6 +2066,7 @@ class MainWindow(QMainWindow):
         self.btn_analyze_training.setEnabled(not self.analysis_in_flight)
         self.btn_analyze_pgn.setEnabled(not self.analysis_in_flight)
         self.btn_engine_start.setEnabled(not self.engine_start_in_flight)
+        self._refresh_overview()
 
     def _show_fairness(self) -> None:
         QMessageBox.information(
@@ -1352,7 +2077,19 @@ class MainWindow(QMainWindow):
             "automatische Live-Erkennung mit Engine-Ausgabe und keine Anti-Cheat-Umgehung.",
         )
 
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if not self._ui_geometry_applied:
+            self._ui_geometry_applied = True
+            if self.config.ui.start_maximized:
+                self.showMaximized()
+            else:
+                self._initial_geometry()
+        self._refresh_overview()
+
     def _save_config(self) -> None:
+        if not self.isMaximized():
+            self._capture_window_size()
         try:
             self._persist_config()
         except OSError as exc:
@@ -1362,12 +2099,27 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Konfiguration gespeichert.")
 
     def _persist_config(self) -> None:
+        if self.isMaximized():
+            self.config.ui.start_maximized = True
+        else:
+            self.config.ui.start_maximized = self.maximized_check.isChecked()
+        self.config.ui.window_width = self.window_width_spin.value()
+        self.config.ui.window_height = self.window_height_spin.value()
         self._sync_engine_settings()
         self.config.last_fen = self.board.fen()
         save_config(self.config)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         self.preview_timer.stop()
+        if not self.isMaximized() and self.isVisible():
+            for widget in (self.window_width_spin, self.window_height_spin):
+                widget.blockSignals(True)
+            self.window_width_spin.setValue(max(720, self.width()))
+            self.window_height_spin.setValue(max(520, self.height()))
+            for widget in (self.window_width_spin, self.window_height_spin):
+                widget.blockSignals(False)
+            self.config.ui.window_width = self.window_width_spin.value()
+            self.config.ui.window_height = self.window_height_spin.value()
         app = QGuiApplication.instance()
         if self.hotkey_filter is not None:
             try:

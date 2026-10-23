@@ -35,6 +35,10 @@ class OverlaySettings:
     scale_percent: int = 100
     hotkey: str = DEFAULT_HOTKEY
     visible: bool = True
+    show_frame: bool = True
+    frame_color: str = "#ff2d2d"
+    frame_width: int = 5
+    coordinate_scale_percent: int = 0
 
 
 @dataclass
@@ -45,6 +49,15 @@ class CaptureSettings:
     orientation: str = "white_bottom"
     warp_size: int = 640
     change_threshold: float = 8.0
+    auto_frame: bool = True
+
+
+@dataclass
+class UiSettings:
+    window_width: int = 1380
+    window_height: int = 900
+    font_scale_percent: int = 100
+    start_maximized: bool = False
 
 
 @dataclass
@@ -52,6 +65,7 @@ class AppConfig:
     engine: EngineSettings = field(default_factory=EngineSettings)
     overlay: OverlaySettings = field(default_factory=OverlaySettings)
     capture: CaptureSettings = field(default_factory=CaptureSettings)
+    ui: UiSettings = field(default_factory=UiSettings)
     last_fen: str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     side_to_move: str = "w"
     occupancy_std_threshold: float = 18.0
@@ -69,6 +83,7 @@ class AppConfig:
         cfg.engine = EngineSettings(**_merge(EngineSettings, _section(data, "engine")))
         cfg.overlay = OverlaySettings(**_merge(OverlaySettings, _section(data, "overlay")))
         cfg.capture = CaptureSettings(**_merge(CaptureSettings, _section(data, "capture")))
+        cfg.ui = UiSettings(**_merge(UiSettings, _section(data, "ui")))
         cfg.last_fen = str(data.get("last_fen", cfg.last_fen))
         cfg.side_to_move = str(data.get("side_to_move", cfg.side_to_move))
         cfg.occupancy_std_threshold = data.get(
@@ -97,6 +112,14 @@ class AppConfig:
         self.overlay.scale_percent = _bounded_int(self.overlay.scale_percent, 60, 200, 100)
         self.overlay.hotkey = str(self.overlay.hotkey) or DEFAULT_HOTKEY
         self.overlay.visible = bool(self.overlay.visible)
+        self.overlay.show_frame = bool(self.overlay.show_frame)
+        self.overlay.frame_color = _normalise_color(self.overlay.frame_color, "#ff2d2d")
+        self.overlay.frame_width = _bounded_int(self.overlay.frame_width, 1, 24, 5)
+        self.overlay.coordinate_scale_percent = _bounded_int(
+            self.overlay.coordinate_scale_percent, 0, 400, 0
+        )
+        if 0 < self.overlay.coordinate_scale_percent < 25:
+            self.overlay.coordinate_scale_percent = 0
 
         self.capture.monitor_index = _bounded_int(self.capture.monitor_index, 0, 128, 1)
         self.capture.warp_size = _bounded_int(self.capture.warp_size, 128, 1600, 640)
@@ -112,6 +135,12 @@ class AppConfig:
             self.capture.orientation = "white_bottom"
         self.capture.region = _normalise_region(self.capture.region)
         self.capture.corners = _normalise_corners(self.capture.corners)
+        self.capture.auto_frame = bool(self.capture.auto_frame)
+
+        self.ui.window_width = _bounded_int(self.ui.window_width, 720, 6000, 1380)
+        self.ui.window_height = _bounded_int(self.ui.window_height, 520, 4000, 900)
+        self.ui.font_scale_percent = _bounded_int(self.ui.font_scale_percent, 70, 200, 100)
+        self.ui.start_maximized = bool(self.ui.start_maximized)
 
         self.occupancy_std_threshold = _bounded_float(
             self.occupancy_std_threshold, 1.0, 100.0, 18.0
@@ -164,6 +193,19 @@ def _normalise_region(value: Any) -> dict[str, int] | None:
     if region["width"] < 16 or region["height"] < 16:
         return None
     return region
+
+
+def _normalise_color(value: Any, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    text = value.strip()
+    if len(text) == 7 and text.startswith("#"):
+        try:
+            int(text[1:], 16)
+        except ValueError:
+            return default
+        return text.lower()
+    return default
 
 
 def _normalise_corners(value: Any) -> list[list[float]] | None:
