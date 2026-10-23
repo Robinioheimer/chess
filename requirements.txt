@@ -1,8 +1,7 @@
-opencv-python>=4.9.0,<5
-python-chess>=1.10.0
-numpy>=1.26.0
-PySide6>=6.6.0
-mss>=9.0.0
-Pillow>=10.0.0
-pytest>=8.0.0
-pyinstaller>=6.0.0
+# Laufzeitabhängigkeiten; OpenCV wird ohne eigene GUI benötigt (Qt stellt die GUI).
+opencv-python-headless>=4.9.0,<5
+python-chess>=1.10.0,<2
+numpy>=1.26.0,<3
+PySide6>=6.6.0,<7
+mss>=9.0.0,<11
+Pillow>=10.0.0,<14

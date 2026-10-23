@@ -23,9 +23,8 @@ def assets_dir() -> Path:
 
 
 def models_dir() -> Path:
-    path = assets_dir() / "models"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    # Bundled assets can be read-only in an installed package or PyInstaller build.
+    return assets_dir() / "models"
 
 
 def app_data_dir() -> Path:

@@ -1,2 +1,0 @@
-[console_scripts]
-stockfish-vision = stockfish_vision.app:main

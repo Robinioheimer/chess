@@ -8,16 +8,42 @@ ORIENTATIONS = ("white_bottom", "white_top", "white_left", "white_right")
 
 
 def _as_corners(corners: np.ndarray | list[list[float]]) -> np.ndarray:
-    points = np.asarray(corners, dtype=np.float32).reshape(4, 2)
-    if points.shape != (4, 2):
-        raise ValueError("Es werden genau vier Brettecken benötigt.")
+    try:
+        points = np.asarray(corners, dtype=np.float32).reshape(4, 2)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Es werden genau vier Brettecken mit x/y-Koordinaten benötigt.") from exc
+    if not np.isfinite(points).all():
+        raise ValueError("Brettecken müssen endliche Koordinaten haben.")
+    return points
+
+
+def validate_corners(corners: np.ndarray | list[list[float]]) -> np.ndarray:
+    """Validate an ordered, convex quadrilateral before warping."""
+    points = _as_corners(corners)
+    if len(np.unique(points, axis=0)) != 4:
+        raise ValueError("Die vier Brettecken müssen voneinander verschieden sein.")
+    edges = np.roll(points, -1, axis=0) - points
+    following = np.roll(edges, -1, axis=0)
+    cross = edges[:, 0] * following[:, 1] - edges[:, 1] * following[:, 0]
+    if np.any(np.isclose(cross, 0.0, atol=1e-4)) or not (
+        np.all(cross > 0) or np.all(cross < 0)
+    ):
+        raise ValueError(
+            "Die Ecken müssen ein konvexes Viereck bilden und der Reihe nach "
+            "(oben links, oben rechts, unten rechts, unten links) gesetzt werden."
+        )
+    area = abs(float(cv2.contourArea(points)))
+    if area < 64.0:
+        raise ValueError("Der kalibrierte Brettbereich ist zu klein.")
     return points
 
 
 def perspective_matrix(
     corners: np.ndarray | list[list[float]], size: int = 400
 ) -> np.ndarray:
-    src = _as_corners(corners)
+    if not 64 <= int(size) <= 4096:
+        raise ValueError("Die Warp-Größe muss zwischen 64 und 4096 Pixeln liegen.")
+    src = validate_corners(corners)
     dst = np.array(
         [[0.0, 0.0], [size - 1.0, 0.0], [size - 1.0, size - 1.0], [0.0, size - 1.0]],
         dtype=np.float32,
@@ -26,14 +52,21 @@ def perspective_matrix(
 
 
 def inverse_matrix(matrix: np.ndarray) -> np.ndarray:
-    return np.linalg.inv(matrix)
+    try:
+        return np.linalg.inv(matrix)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Die Kalibrierungsmatrix ist nicht umkehrbar.") from exc
 
 
 def warp_board(
     image: np.ndarray, corners: np.ndarray | list[list[float]], size: int = 400
 ) -> tuple[np.ndarray, np.ndarray]:
+    if not isinstance(image, np.ndarray) or image.size == 0:
+        raise ValueError("Für die Bretttransformation wird ein Bild benötigt.")
     matrix = perspective_matrix(corners, size)
     warped = cv2.warpPerspective(image, matrix, (size, size))
+    if warped.size == 0:
+        raise RuntimeError("Die Bretttransformation ist fehlgeschlagen.")
     return warped, matrix
 
 
@@ -68,7 +101,11 @@ def image_rc_to_square(col: int, row: int, orientation: str) -> chess.Square:
 
 
 def extract_square(warped: np.ndarray, col: int, row: int) -> np.ndarray:
+    if not (0 <= col <= 7 and 0 <= row <= 7):
+        raise ValueError("Feldkoordinaten müssen im Bereich 0..7 liegen.")
     height, width = warped.shape[:2]
+    if height < 8 or width < 8:
+        raise ValueError("Das transformierte Brett ist zu klein.")
     tile_w = width / 8.0
     tile_h = height / 8.0
     x0 = int(round(col * tile_w))
@@ -96,6 +133,22 @@ def square_center_screen(
     point = np.array([[[x, y]]], dtype=np.float32)
     mapped = cv2.perspectiveTransform(point, matrix_inv)
     return float(mapped[0, 0, 0]), float(mapped[0, 0, 1])
+
+
+def square_polygon_screen(
+    square: chess.Square,
+    orientation: str,
+    size: int,
+    matrix_inv: np.ndarray,
+) -> list[tuple[float, float]]:
+    col, row = square_to_image_rc(square, orientation)
+    tile = size / 8.0
+    margin = tile * 0.06
+    x0, y0 = col * tile + margin, row * tile + margin
+    x1, y1 = (col + 1) * tile - margin, (row + 1) * tile - margin
+    points = np.array([[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]], dtype=np.float32)
+    mapped = cv2.perspectiveTransform(points, matrix_inv)
+    return [(float(x), float(y)) for x, y in mapped[0]]
 
 
 def board_mean_abs_diff(previous: np.ndarray | None, current: np.ndarray) -> float:

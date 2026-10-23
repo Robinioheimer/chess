@@ -3,8 +3,8 @@ from __future__ import annotations
 from stockfish_vision.policy import (
     CONFIRMATION_REQUIRED,
     LIVE_GAME_BLOCK_MESSAGE,
-    LiveGameGuard,
     RAPID_CHANGE_MESSAGE,
+    LiveGameGuard,
     can_analyze,
 )
 
