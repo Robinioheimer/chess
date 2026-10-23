@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 import random
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 
 def _draw_pawn(draw: ImageDraw.ImageDraw, color: tuple[int, int, int], box: tuple[int, int, int, int]) -> None:
@@ -135,7 +136,8 @@ def render_piece_glyph(
         image = image.rotate(angle, resample=Image.Resampling.BILINEAR, fillcolor=bg)
         arr = np.array(image).astype(np.int16)
         noise = rng.randint(0, 12)
-        arr += np.random.randint(-noise, noise + 1, arr.shape, dtype=np.int16)
+        np_rng = np.random.default_rng(rng.randrange(2**32))
+        arr += np_rng.integers(-noise, noise + 1, arr.shape, dtype=np.int16)
         arr = np.clip(arr, 0, 255).astype(np.uint8)
         return arr
     return np.array(image, dtype=np.uint8)

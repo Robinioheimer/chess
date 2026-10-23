@@ -1,0 +1,33 @@
+{
+  "engine": {
+    "executable": "C:/Tools/Stockfish/stockfish.exe",
+    "depth": 18,
+    "move_time_ms": 800,
+    "threads": 4,
+    "hash_mb": 128,
+    "multipv": 3
+  },
+  "overlay": {
+    "opacity": 0.75,
+    "panel_width": 380,
+    "panel_height": 230,
+    "panel_offset_x": 16,
+    "panel_offset_y": 16,
+    "scale_percent": 100,
+    "hotkey": "ctrl+shift+f8",
+    "visible": true
+  },
+  "capture": {
+    "monitor_index": 1,
+    "region": null,
+    "corners": null,
+    "orientation": "white_bottom",
+    "warp_size": 640,
+    "change_threshold": 8.0
+  },
+  "last_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "side_to_move": "w",
+  "occupancy_std_threshold": 18.0,
+  "min_piece_confidence": 0.45,
+  "model_path": ""
+}

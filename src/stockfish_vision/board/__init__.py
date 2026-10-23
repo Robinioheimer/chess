@@ -6,7 +6,9 @@ from stockfish_vision.board.geometry import (
     perspective_matrix,
     square_center_image,
     square_center_screen,
+    square_polygon_screen,
     square_to_image_rc,
+    validate_corners,
     warp_board,
 )
 
@@ -18,6 +20,8 @@ __all__ = [
     "perspective_matrix",
     "square_center_image",
     "square_center_screen",
+    "square_polygon_screen",
     "square_to_image_rc",
+    "validate_corners",
     "warp_board",
 ]

@@ -2,8 +2,9 @@
 setlocal
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (
-  echo Bitte zuerst setup.bat ausfuehren.
+  echo Bitte zuerst setup.bat erfolgreich ausfuehren.
   exit /b 1
 )
 ".venv\Scripts\python.exe" -m stockfish_vision %*
-endlocal
+set "EXIT_CODE=%ERRORLEVEL%"
+endlocal & exit /b %EXIT_CODE%

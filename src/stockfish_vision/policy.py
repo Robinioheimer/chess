@@ -19,7 +19,7 @@ CONFIRMATION_REQUIRED = (
 RAPID_CHANGE_MESSAGE = (
     "Das Brett hat sich mehrfach in kurzer Zeit verändert. "
     "Das sieht nach einer laufenden Partie aus; die Engine bleibt gesperrt. "
-    "Nehmen Sie einen neuen Snapshot einer ruhenden Trainingsstellung."
+    "Nehmen Sie nach einer Ruhepause einen neuen Snapshot einer Trainingsstellung."
 )
 
 
@@ -31,21 +31,25 @@ class PositionChange:
 
 @dataclass
 class LiveGameGuard:
-    """Blocks live online assistance. Snapshot analysis is allowed only when idle."""
+    """Conservative guard for frozen snapshots; no live engine automation exists."""
 
     window: timedelta = timedelta(seconds=12)
     max_changes: int = 3
     history: list[PositionChange] = field(default_factory=list)
 
-    def record(self, fen: str) -> None:
-        now = datetime.now()
-        if self.history and self.history[-1].fen == fen:
-            return
-        self.history.append(PositionChange(fen=fen, at=now))
+    def _prune(self, now: datetime) -> None:
         cutoff = now - self.window
         self.history = [item for item in self.history if item.at >= cutoff]
 
+    def record(self, fen: str) -> None:
+        now = datetime.now()
+        self._prune(now)
+        if self.history and self.history[-1].fen == fen:
+            return
+        self.history.append(PositionChange(fen=fen, at=now))
+
     def looks_like_live_game(self) -> bool:
+        self._prune(datetime.now())
         unique = {item.fen.split(" ")[0] for item in self.history}
         return len(unique) >= self.max_changes
 

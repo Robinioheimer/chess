@@ -4,24 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stockfish-vision-chess-ai"
-version = "1.0.0"
+version = "1.1.0"
 description = "Bildschirm-Schachbrett-Erkennung und Stockfish-Analyse für Trainingsstellungen und abgeschlossene Partien."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Robinio" }]
 dependencies = [
-  "opencv-python>=4.9.0,<5",
-  "python-chess>=1.10.0",
-  "numpy>=1.26.0",
-  "PySide6>=6.6.0",
-  "mss>=9.0.0",
-  "Pillow>=10.0.0",
+  "opencv-python-headless>=4.9.0,<5",
+  "python-chess>=1.10.0,<2",
+  "numpy>=1.26.0,<3",
+  "PySide6>=6.6.0,<7",
+  "mss>=9.0.0,<11",
+  "Pillow>=10.0.0,<14",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0"]
-packaging = ["pyinstaller>=6.0.0"]
+dev = ["pytest>=8.0.0,<10", "ruff>=0.8.0"]
+packaging = ["pyinstaller>=6.0.0,<7"]
 
 [project.scripts]
 stockfish-vision = "stockfish_vision.app:main"
@@ -36,3 +36,10 @@ stockfish_vision = ["assets/models/*"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
